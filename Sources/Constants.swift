@@ -10,6 +10,7 @@ import Foundation
 
 public enum MuxerConstants {
     public static let lockdowndPort: UInt16 = 62078     // lockdown daemon port
+    public static let rsdPort: UInt16 = 49152
 
     public static let usbmuxdHost = "127.0.0.1"
     public static let usbmuxdPort: UInt16 = 27015       // usbmux daemon port

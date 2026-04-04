@@ -35,7 +35,7 @@ let package = Package(
                 "Makefile",
                 "lib",
             ],
-            sources: ["MinimuxerBridge.swift"]
+            sources: ["MinimuxerBridge.swift", "MinimuxerBridgeIdevice.swift"]
         ),
         // MARK: Main SPM target
         .target(

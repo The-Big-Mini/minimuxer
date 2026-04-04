@@ -9,8 +9,39 @@
 import Foundation
 import RustBridge
 
-public class Jit {
+public protocol JITProvider {
+    func debugApp(appId: String) throws;
+    func attachDebugger(pid: UInt32) throws;
+}
+
+public class JIT {
+    private static var provider: JITProvider?;
+    
+    private static func getProvider() -> any JITProvider {
+        if let provider {
+            return provider
+        } else {
+            if Muxer.isrppairing {
+                provider = RPJit()
+            } else {
+                provider = LockDownJIT()
+            }
+        }
+        
+        return provider!
+    }
+
     public static func debugApp(appId: String) throws {
+        try getProvider().debugApp(appId: appId)
+    }
+    
+    public static func attachDebugger(pid: UInt32) throws {
+        try getProvider().attachDebugger(pid: pid)
+    }
+}
+
+public class LockDownJIT: JITProvider {
+    public func debugApp(appId: String) throws {
         print("[minimuxer] Debugging app ID: \(appId)")
         let device = try Device.getFirstDevice()
 
@@ -56,7 +87,7 @@ public class Jit {
         }
     }
 
-    private static func debugPre17(device: Device, appId: String) throws {
+    private func debugPre17(device: Device, appId: String) throws {
         guard let debugServer = RustDebugserver.connect(device: device.internalInstance, label: "minimuxer") else {
             print("[minimuxer] ERROR: Failed to start debug server")
             throw MinimuxerError.CreateDebug
@@ -102,7 +133,7 @@ public class Jit {
         _ = debugServer.sendCommand("D")
     }
 
-    public static func attachDebugger(pid: UInt32) throws {
+    public func attachDebugger(pid: UInt32) throws {
         print("[minimuxer] Debugging process ID: \(pid)")
         let device = try Device.getFirstDevice()
         guard let debugServer = RustDebugserver.connect(device: device.internalInstance, label: "minimuxer") else {
@@ -114,5 +145,15 @@ public class Jit {
         print("[minimuxer] Sending command: \(command)")
         _ = debugServer.sendCommand(command)
         _ = debugServer.sendCommand("D")
+    }
+}
+
+public class RPJit: JITProvider {
+    public func debugApp(appId: String) throws {
+        try RustIdevice.debugApp(appId: appId)
+    }
+    
+    public func attachDebugger(pid: UInt32) throws {
+        try RustIdevice.debugApp(pid: pid)
     }
 }

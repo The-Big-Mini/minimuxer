@@ -9,8 +9,41 @@
 import Foundation
 import RustBridge
 
+public protocol InstallProvider {
+    func yeetAppAfc(bundleId: String, ipaBytes: Data) throws
+    func installIpa(bundleId: String) throws
+    func removeApp(bundleId: String) throws
+}
+
 public class Install {
+    public static var provider: InstallProvider?;
+    
+    private static func getProvider() throws -> any InstallProvider {
+        if let provider {
+            return provider
+        } else {
+            if Muxer.isrppairing {
+                provider = RPInstall()
+            } else {
+                provider = LockDownInstall()
+            }
+        }
+        return provider!
+    }
+
     public static func yeetAppAfc(bundleId: String, ipaBytes: Data) throws {
+        try getProvider().yeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)
+    }
+    public static func installIpa(bundleId: String) throws {
+        try getProvider().installIpa(bundleId: bundleId)
+    }
+    public static func removeApp(bundleId: String) throws {
+        try getProvider().removeApp(bundleId: bundleId)
+    }
+}
+
+public class LockDownInstall: InstallProvider {
+    public func yeetAppAfc(bundleId: String, ipaBytes: Data) throws {
         print("[minimuxer] Yeeting IPA for bundle ID: \(bundleId)")
 
         let deviceIP = try DeviceEndpoint.shared.ip()
@@ -40,7 +73,7 @@ public class Install {
         print("[minimuxer] Successfully staged IPA")
     }
     
-    private static func mkdirP(_ path: String, afc: RustAfc) {
+    private func mkdirP(_ path: String, afc: RustAfc) {
         var current = ""
         for part in path.split(separator: "/") {
             current += "/\(part)"
@@ -48,7 +81,7 @@ public class Install {
         }
     }
 
-    public static func installIpa(bundleId: String) throws {
+    public func installIpa(bundleId: String) throws {
         print("[minimuxer] Installing app for bundle ID: \(bundleId)")
         let device = try Device.getFirstDevice()
         guard let inst = RustInstProxy.connect(device: device.internalInstance, label: "ideviceinstaller") else {
@@ -64,7 +97,7 @@ public class Install {
         print("[minimuxer] Install done!")
     }
 
-    public static func removeApp(bundleId: String) throws {
+    public func removeApp(bundleId: String) throws {
         print("[minimuxer] Removing app: \(bundleId)")
         let device = try Device.getFirstDevice()
         guard let inst = RustInstProxy.connect(device: device.internalInstance, label: "minimuxer-remove-app") else {
@@ -77,5 +110,17 @@ public class Install {
             throw MinimuxerError.UninstallApp
         }
         print("[minimuxer] Remove done!")
+    }
+}
+
+public class RPInstall: InstallProvider {
+    public func yeetAppAfc(bundleId: String, ipaBytes: Data) throws {
+        try RustIdevice.yeetAppAfc(bundleId: bundleId, ipaBytes: ipaBytes)
+    }
+    public func installIpa(bundleId: String) throws {
+        try RustIdevice.installIpa(bundleId: bundleId)
+    }
+    public func removeApp(bundleId: String) throws {
+        try RustIdevice.removeApp(bundleId: bundleId)
     }
 }

@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import RustBridge
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)
@@ -16,6 +17,7 @@ import Glibc
 public class Muxer {
     public static var started = false
     public static var usbmuxdReady = false
+    public static var isrppairing = false
     
     private static let DEVICE_ATTACH = "Attached"
     private static let DEVICE_DETACH = "Detached"
@@ -49,19 +51,28 @@ public class Muxer {
             print("[minimuxer] ERROR: Failed to parse pairing file")
             throw MinimuxerError.PairingFile
         }
-
+        
         cachedPairingDict = pairingDict
         cachedPairingXml  = pairingXml
 
-        guard let _ = pairingDict["UDID"] as? String else {
+        if let _ = pairingDict["private_key"] as? Data {
+            print("[minimuxer] INFO: RPPairing file detected")
+            isrppairing = true
+        } else if let _ = pairingDict["UDID"] as? String {
+            print("[minimuxer] INFO: Lockdown pairing file detected")
+        } else {
             print("[minimuxer] ERROR: Pairing file missing UDID")
             throw MinimuxerError.PairingFile
         }
 
         started = true
-
-        Thread.detachNewThread { listenLoop() }
-        Heartbeat.startBeat()
+        
+        if isrppairing {
+            try RustIdevice.setRpPairingFile(pairingFile)
+        } else {
+            Thread.detachNewThread { listenLoop() }
+            Heartbeat.startBeat()
+        }
         print("[minimuxer] minimuxer has started!")
     }
 

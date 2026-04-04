@@ -27,13 +27,22 @@ public struct Minimuxer {
         
         let deviceIP: String
         do {
-            deviceIP = try DeviceEndpoint.shared.ip()
+            if Muxer.isrppairing {
+                deviceIP = "10.7.0.1"
+            } else {
+                deviceIP = try DeviceEndpoint.shared.ip()
+            }
+
         } catch {
             print("[minimuxer] minimuxer not ready: device endpoint not initialized")
             return false
         }
         
         let deviceConnection = testDeviceConnection(ifaddr: deviceIP)
+        if Muxer.isrppairing {
+            return true
+        }
+        
         let deviceExists: Bool
         do {
             _ = try Device.getFirstDevice()
@@ -84,7 +93,13 @@ public struct Minimuxer {
             print("[minimuxer] ERROR: minimuxer has not started!")
             return nil
         }
-        let udid = (try? Device.getFirstDevice())?.getUDID()
+        let udid: String?
+        if Muxer.isrppairing {
+            udid = RustIdevice.fetchUDID()
+        } else {
+            udid = (try? Device.getFirstDevice())?.getUDID()
+        }
+
         if let udid = udid {
             print("[minimuxer] UDID: \(udid)")
         } else {
@@ -98,7 +113,7 @@ public struct Minimuxer {
         
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = MuxerConstants.lockdowndPort.bigEndian
+        addr.sin_port = Muxer.isrppairing ? MuxerConstants.rsdPort.bigEndian : MuxerConstants.lockdowndPort.bigEndian
         inet_pton(AF_INET, ip, &addr.sin_addr)
 
         let fd = socket(AF_INET, SOCK_STREAM, 0)
@@ -132,11 +147,11 @@ public struct Minimuxer {
     }
 
     public static func debugApp(appId: String) throws {
-        try Jit.debugApp(appId: appId)
+        try JIT.debugApp(appId: appId)
     }
 
     public static func attachDebugger(pid: UInt32) throws {
-        try Jit.attachDebugger(pid: pid)
+        try JIT.attachDebugger(pid: pid)
     }
 
     public static func startAutoMounter(docsPath: String) {

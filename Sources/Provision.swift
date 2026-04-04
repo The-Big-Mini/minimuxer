@@ -9,8 +9,41 @@
 import Foundation
 import RustBridge
 
+public protocol ProvisionProvider {
+    func installProvisioningProfile(profile: Data) throws;
+    func removeProvisioningProfile(id: String) throws;
+    func dumpProfiles(docsPath: String) throws -> String;
+}
+
 public class Provision {
+    public static var provider: ProvisionProvider?;
+    
+    private static func getProvider() -> any ProvisionProvider {
+        if let provider {
+            return provider
+        } else {
+            if Muxer.isrppairing {
+                provider = RPProvision()
+            } else {
+                provider = LockDownProvision()
+            }
+        }
+        return provider!
+    }
+    
     public static func installProvisioningProfile(profile: Data) throws {
+        try getProvider().installProvisioningProfile(profile: profile)
+    }
+    public static func removeProvisioningProfile(id: String) throws {
+        try getProvider().removeProvisioningProfile(id: id)
+    }
+    public static func dumpProfiles(docsPath: String) throws -> String {
+        try getProvider().dumpProfiles(docsPath: docsPath)
+    }
+}
+
+public class LockDownProvision: ProvisionProvider {
+    public func installProvisioningProfile(profile: Data) throws {
         print("[minimuxer] Installing provisioning profile")
         let device = try Device.getFirstDevice()
         guard let misagent = RustMisagent.connect(device: device.internalInstance, label: "minimuxer-install-prov") else {
@@ -25,7 +58,7 @@ public class Provision {
         print("[minimuxer] Successfully installed provisioning profile!")
     }
 
-    public static func removeProvisioningProfile(id: String) throws {
+    public func removeProvisioningProfile(id: String) throws {
         print("[minimuxer] Removing profile with ID: \(id)")
         let device = try Device.getFirstDevice()
         guard let misagent = RustMisagent.connect(device: device.internalInstance, label: "minimuxer-install-prov") else {
@@ -40,7 +73,7 @@ public class Provision {
         print("[minimuxer] Successfully removed profile")
     }
 
-    public static func dumpProfiles(docsPath: String) throws -> String {
+    public func dumpProfiles(docsPath: String) throws -> String {
         print("[minimuxer] Dumping profiles")
         let device = try Device.getFirstDevice()
         guard let misagent = RustMisagent.connect(device: device.internalInstance, label: "minimuxer-install-prov") else {
@@ -84,5 +117,22 @@ public class Provision {
         }
         print("[minimuxer] Profile dump success")
         return dumpDir
+    }
+}
+
+
+public class RPProvision: ProvisionProvider {
+    public func dumpProfiles(docsPath: String) throws -> String {
+        let path = docsPath.hasPrefix("file://") ? String(docsPath.dropFirst(7)) : docsPath
+        try RustIdevice.dumpProfiles(path)
+        return "\(path)/PROVISION"
+    }
+    
+    public func installProvisioningProfile(profile: Data) throws {
+        try RustIdevice.installProvisioningProfile(profile)
+    }
+    
+    public func removeProvisioningProfile(id: String) throws {
+        try RustIdevice.removeProvisioningProfile(id: id)
     }
 }

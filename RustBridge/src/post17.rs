@@ -16,14 +16,12 @@ use idevice::debug_proxy::DebugProxyClient;
 use idevice::mobile_image_mounter::ImageMounter;
 use idevice::provider::{IdeviceProvider, TcpProvider};
 use idevice::usbmuxd::UsbmuxdConnection;
-use idevice::IdeviceService;
+use idevice::{IdeviceService, RsdService};
 use log::{debug, error, info};
 use once_cell::sync::Lazy;
 use tokio::runtime::{self, Runtime};
 
-
-
-static RUNTIME: Lazy<Runtime> = Lazy::new(|| {
+pub static RUNTIME: Lazy<Runtime> = Lazy::new(|| {
     runtime::Builder::new_multi_thread()
         .enable_io()
         .enable_time()
@@ -52,7 +50,6 @@ async fn get_provider(muxer_addr: &str, device_ip: &str) -> Result<TcpProvider, 
         idevice::usbmuxd::UsbmuxdAddr::TcpSocket(std::net::SocketAddr::V4(
             SocketAddrV4::from_str(muxer_addr).unwrap(),
         )),
-        0,
         "asdf",
     );
 
@@ -74,66 +71,90 @@ pub(crate) fn debug_app_post17(app_id: String, muxer_addr: String, device_ip: St
 
         let proxy = match CoreDeviceProxy::connect(&provider).await {
             Ok(p) => p,
-            Err(e) => { error!("CoreDeviceProxy: {:?}", e); return 2; }
+            Err(e) => {
+                error!("CoreDeviceProxy: {:?}", e);
+                return 2;
+            }
         };
 
-        let rsd_port = proxy.handshake.server_rsd_port;
-        let mut adapter = match proxy.create_software_tunnel() {
+        let rsd_port = proxy.tunnel_info().server_rsd_port;
+        let adapter = match proxy.create_software_tunnel() {
             Ok(a) => a,
-            Err(e) => { error!("SoftwareTunnel: {:?}", e); return 3; }
+            Err(e) => {
+                error!("SoftwareTunnel: {:?}", e);
+                return 3;
+            }
         };
 
-        if let Err(e) = adapter.connect(rsd_port).await {
-            error!("RemoteXPC connect: {:?}", e); return 4;
-        }
+        let mut adapter_handle = adapter.to_async_handle();
+        let stream = match adapter_handle.connect(rsd_port).await {
+            Ok(a) => a,
+            Err(e) => {
+                error!("Failed to connect to RemoteXPC port: {:?}", e);
+                return 4;
+            }
+        };
 
-        let xpc_client = match idevice::xpc::XPCDevice::new(adapter).await {
+        let mut handshake = match idevice::rsd::RsdHandshake::new(stream).await {
             Ok(x) => x,
-            Err(e) => { error!("XPC handshake: {:?}", e); return 5; }
+            Err(e) => {
+                error!("Failed to get handshake: {e:?}");
+                return 5;
+            }
         };
 
-        let dvt_port = match xpc_client.services.get(idevice::dvt::SERVICE_NAME) {
-            Some(s) => s.port, None => return 6,
+        let mut rs = match idevice::dvt::remote_server::RemoteServerClient::connect_rsd(
+            &mut adapter_handle,
+            &mut handshake,
+        )
+        .await
+        {
+            Ok(x) => x,
+            Err(e) => {
+                error!("Failed to get connect to remote server client: {e:?}");
+                return 6;
+            }
         };
-        let debug_proxy_port = match xpc_client.services.get(idevice::debug_proxy::SERVICE_NAME) {
-            Some(s) => s.port, None => return 6,
-        };
-
-        let mut adapter = xpc_client.into_inner();
-        if let Err(e) = adapter.close().await { error!("XPC close: {:?}", e); return 7; }
-
-        if let Err(e) = adapter.connect(dvt_port).await {
-            error!("DVT connect: {:?}", e); return 4;
-        }
-
-        let mut rs = idevice::dvt::remote_server::RemoteServerClient::new(adapter);
-        if let Err(e) = rs.read_message(0).await { error!("DVT read: {:?}", e); return 8; }
 
         let mut pc = match idevice::dvt::process_control::ProcessControlClient::new(&mut rs).await {
             Ok(p) => p,
-            Err(e) => { error!("ProcessControl: {:?}", e); return 9; }
+            Err(e) => {
+                error!("ProcessControl: {:?}", e);
+                return 9;
+            }
         };
 
         let pid = match pc.launch_app(app_id, None, None, true, false).await {
             Ok(p) => p,
-            Err(e) => { error!("LaunchApp: {:?}", e); return 10; }
+            Err(e) => {
+                error!("LaunchApp: {:?}", e);
+                return 10;
+            }
         };
         debug!("Launched PID {pid}");
         let _ = pc.disable_memory_limit(pid).await;
 
-        let mut adapter = rs.into_inner();
-        if let Err(e) = adapter.close().await { error!("DVT close: {:?}", e); return 7; }
-
-        info!("Connecting to debug proxy port {debug_proxy_port}");
-        if let Err(e) = adapter.connect(debug_proxy_port).await {
-            error!("DebugProxy connect: {:?}", e); return 4;
-        }
-
-        let mut dp = DebugProxyClient::new(adapter);
-        for cmd in [format!("vAttach;{pid:02X}"), "D".into(), "D".into(), "D".into(), "D".into()] {
+        let mut dp = match DebugProxyClient::connect_rsd(&mut adapter_handle, &mut handshake).await
+        {
+            Ok(p) => p,
+            Err(e) => {
+                error!("DebugProxy connect: {:?}", e);
+                return 4;
+            }
+        };
+        for cmd in [
+            format!("vAttach;{pid:02X}"),
+            "D".into(),
+            "D".into(),
+            "D".into(),
+            "D".into(),
+        ] {
             match dp.send_command(cmd.into()).await {
                 Ok(res) => debug!("cmd res: {res:?}"),
-                Err(e) => { error!("DebugProxy cmd: {:?}", e); return 11; }
+                Err(e) => {
+                    error!("DebugProxy cmd: {:?}", e);
+                    return 11;
+                }
             }
         }
         0
@@ -157,54 +178,82 @@ pub(crate) fn mount_personalized_ddi(
 
         let mut lockdown = match idevice::lockdown::LockdownClient::connect(&provider).await {
             Ok(l) => l,
-            Err(e) => { error!("Lockdown connect: {:?}", e); return 4; }
+            Err(e) => {
+                error!("Lockdown connect: {:?}", e);
+                return 4;
+            }
         };
 
-        let ucid_val = match lockdown.get_value("UniqueChipID").await {
+        let ucid_val = match lockdown.get_value(Some("UniqueChipID"), None).await {
             Ok(u) => u,
             Err(_) => {
-                if let Err(e) = lockdown.start_session(&provider.get_pairing_file().await.unwrap()).await {
-                    error!("Session: {:?}", e); return 4;
+                if let Err(e) = lockdown
+                    .start_session(&provider.get_pairing_file().await.unwrap())
+                    .await
+                {
+                    error!("Session: {:?}", e);
+                    return 4;
                 }
-                match lockdown.get_value("UniqueChipID").await {
+                match lockdown.get_value(Some("UniqueChipID"), None).await {
                     Ok(l) => l,
-                    Err(e) => { error!("UniqueChipID: {:?}", e); return 5; }
+                    Err(e) => {
+                        error!("UniqueChipID: {:?}", e);
+                        return 5;
+                    }
                 }
             }
         };
         let unique_chip_id = match ucid_val.as_unsigned_integer() {
             Some(i) => i,
-            None => { error!("UniqueChipID not int"); return 5; }
+            None => {
+                error!("UniqueChipID not int");
+                return 5;
+            }
         };
 
         let mut mounter = match ImageMounter::connect(&provider).await {
             Ok(m) => m,
-            Err(e) => { error!("ImageMounter: {:?}", e); return 6; }
+            Err(e) => {
+                error!("ImageMounter: {:?}", e);
+                return 6;
+            }
         };
 
         let images = match mounter.copy_devices().await {
             Ok(i) => i,
-            Err(e) => { error!("copy_devices: {:?}", e); return 6; }
+            Err(e) => {
+                error!("copy_devices: {:?}", e);
+                return 6;
+            }
         };
-        if !images.is_empty() { info!("Already mounted"); return 0; }
+        if !images.is_empty() {
+            info!("Already mounted");
+            return 0;
+        }
 
         info!("Mounting personalized DDI...");
-        if let Err(e) = mounter.mount_personalized_with_callback(
-            &provider,
-            image_bytes.to_vec(),
-            trustcache_bytes.to_vec(),
-            manifest_bytes,
-            None,
-            unique_chip_id,
-            async |((n, d), _)| {
-                let pct = (n as f64 / d as f64) * 100.0;
-                print!("\rProgress: {pct:.2}%");
-                std::io::stdout().flush().unwrap();
-                if n == d { println!(); }
-            },
-            (),
-        ).await {
-            error!("Mount failed: {:?}", e); return 8;
+        if let Err(e) = mounter
+            .mount_personalized_with_callback(
+                &provider,
+                image_bytes.to_vec(),
+                trustcache_bytes.to_vec(),
+                manifest_bytes,
+                None,
+                unique_chip_id,
+                async |((n, d), _)| {
+                    let pct = (n as f64 / d as f64) * 100.0;
+                    print!("\rProgress: {pct:.2}%");
+                    std::io::stdout().flush().unwrap();
+                    if n == d {
+                        println!();
+                    }
+                },
+                (),
+            )
+            .await
+        {
+            error!("Mount failed: {:?}", e);
+            return 8;
         }
 
         info!("DDI mounted");
