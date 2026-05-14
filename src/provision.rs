@@ -28,7 +28,15 @@ pub fn install_provisioning_profile(profile: &[u8]) -> Res<()> {
     info!("Installing provisioning profile");
 
     if !test_device_connection() {
-        error!("No device connection");
+        error!("No classic device connection — trying RPPairing");
+        if crate::rsd::is_rppairing_available() {
+            return crate::RUNTIME
+                .block_on(crate::rsd::install_provisioning_profile_rppairing(profile))
+                .map_err(|e| {
+                    error!("RPPairing install failed: {:?}", e);
+                    Errors::ProfileInstall
+                });
+        }
         return Err(Errors::NoConnection);
     }
 
@@ -37,7 +45,16 @@ pub fn install_provisioning_profile(profile: &[u8]) -> Res<()> {
     let mis_client = match device.new_misagent_client("minimuxer-install-prov") {
         Ok(m) => m,
         Err(e) => {
-            error!("Failed to start misagent client: {:?}", e);
+            error!("Failed to start classic misagent client: {:?}", e);
+            if crate::rsd::is_rppairing_available() {
+                info!("Falling back to RPPairing for provisioning profile install");
+                return crate::RUNTIME
+                    .block_on(crate::rsd::install_provisioning_profile_rppairing(profile))
+                    .map_err(|e| {
+                        error!("RPPairing install failed: {:?}", e);
+                        Errors::ProfileInstall
+                    });
+            }
             return Err(Errors::CreateMisagent);
         }
     };
@@ -50,7 +67,16 @@ pub fn install_provisioning_profile(profile: &[u8]) -> Res<()> {
             Ok(())
         }
         Err(e) => {
-            error!("Unable to install provisioning profile: {:?}", e);
+            error!("Classic misagent install failed: {:?}", e);
+            if crate::rsd::is_rppairing_available() {
+                info!("Falling back to RPPairing for provisioning profile install");
+                return crate::RUNTIME
+                    .block_on(crate::rsd::install_provisioning_profile_rppairing(profile))
+                    .map_err(|e| {
+                        error!("RPPairing install failed: {:?}", e);
+                        Errors::ProfileInstall
+                    });
+            }
             Err(Errors::ProfileInstall)
         }
     }
@@ -63,7 +89,15 @@ pub fn remove_provisioning_profile(id: String) -> Res<()> {
     info!("Removing profile with ID: {}", id);
 
     if !test_device_connection() {
-        error!("No device connection");
+        error!("No classic device connection — trying RPPairing");
+        if crate::rsd::is_rppairing_available() {
+            return crate::RUNTIME
+                .block_on(crate::rsd::remove_provisioning_profile_rppairing(id))
+                .map_err(|e| {
+                    error!("RPPairing remove failed: {:?}", e);
+                    Errors::ProfileRemove
+                });
+        }
         return Err(Errors::NoConnection);
     }
 
@@ -72,7 +106,16 @@ pub fn remove_provisioning_profile(id: String) -> Res<()> {
     let mis_client = match device.new_misagent_client("minimuxer-install-prov") {
         Ok(m) => m,
         Err(e) => {
-            error!("Failed to start misagent client: {:?}", e);
+            error!("Failed to start classic misagent client: {:?}", e);
+            if crate::rsd::is_rppairing_available() {
+                info!("Falling back to RPPairing for provisioning profile removal");
+                return crate::RUNTIME
+                    .block_on(crate::rsd::remove_provisioning_profile_rppairing(id))
+                    .map_err(|e| {
+                        error!("RPPairing remove failed: {:?}", e);
+                        Errors::ProfileRemove
+                    });
+            }
             return Err(Errors::CreateMisagent);
         }
     };
@@ -83,7 +126,16 @@ pub fn remove_provisioning_profile(id: String) -> Res<()> {
             Ok(())
         }
         Err(e) => {
-            error!("Unable to remove provisioning profile: {:?}", e);
+            error!("Classic misagent remove failed: {:?}", e);
+            if crate::rsd::is_rppairing_available() {
+                info!("Falling back to RPPairing for provisioning profile removal");
+                return crate::RUNTIME
+                    .block_on(crate::rsd::remove_provisioning_profile_rppairing(id))
+                    .map_err(|e| {
+                        error!("RPPairing remove failed: {:?}", e);
+                        Errors::ProfileRemove
+                    });
+            }
             Err(Errors::ProfileRemove)
         }
     }
