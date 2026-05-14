@@ -53,10 +53,15 @@ pub fn test_device_connection() -> bool {
     #[cfg(not(test))]
     {
         use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
+        use std::str::FromStr;
 
         // Connect to lockdownd's socket
+        let ip = crate::muxer::DEVICE_IP
+            .get()
+            .and_then(|s| Ipv4Addr::from_str(s).ok())
+            .unwrap_or(Ipv4Addr::new(10, 7, 0, 1));
         TcpStream::connect_timeout(
-            &SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(10, 7, 0, 1), 62078)),
+            &SocketAddr::V4(SocketAddrV4::new(ip, 62078)),
             Duration::from_millis(100),
         )
         .is_ok()
