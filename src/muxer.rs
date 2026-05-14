@@ -7,9 +7,16 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use log::{error, info, trace, warn};
+use once_cell::sync::OnceCell;
 use plist::{Dictionary, Value};
 
 use crate::{heartbeat::start_beat, plist_to_bytes, raw_packet::RawPacket, Errors};
+
+/// The IP address minimuxer advertises as the device's network address and
+/// uses to probe lockdownd.  Defaults to "10.7.0.1" (the Mini-VPN tunnel
+/// peer) for backward compatibility.  Call `set_device_ip` with the
+/// device's Wi-Fi IP before calling `start` to operate without a VPN.
+pub(crate) static DEVICE_IP: OnceCell<String> = OnceCell::new();
 
 #[swift_bridge::bridge]
 mod ffi {
@@ -17,6 +24,7 @@ mod ffi {
     enum Errors {}
 
     extern "Rust" {
+        fn set_device_ip(ip: String);
         fn start(pairing_file: String, log_path: String) -> Result<(), Errors>;
         fn startWithLogger(
             pairing_file: String,
@@ -25,6 +33,14 @@ mod ffi {
         ) -> Result<(), Errors>;
         fn target_minimuxer_address();
     }
+}
+
+/// Sets the IP address minimuxer will advertise as the device's network
+/// address and use to probe lockdownd.  Must be called before `start`.
+/// Passing the device's own Wi-Fi IP (e.g. "192.168.1.5") eliminates the
+/// need for a VPN tunnel.  Has no effect if called after `start`.
+pub fn set_device_ip(ip: String) {
+    let _ = DEVICE_IP.set(ip);
 }
 
 const LISTEN_PORT: u16 = 27015;
@@ -183,11 +199,13 @@ fn handle_packet(
                 "yurmomlolllllll".into(),
             );
             properties.insert("InterfaceIndex".to_string(), 69.into());
+            let advertised_ip = DEVICE_IP
+                .get()
+                .and_then(|s| Ipv4Addr::from_str(s).ok())
+                .unwrap_or(Ipv4Addr::new(10, 7, 0, 1));
             properties.insert(
                 "NetworkAddress".to_string(),
-                Value::Data(
-                    convert_ip(IpAddr::V4(Ipv4Addr::from_str("10.7.0.1").unwrap())).to_vec(),
-                ),
+                Value::Data(convert_ip(IpAddr::V4(advertised_ip)).to_vec()),
             );
             properties.insert("SerialNumber".to_string(), udid.into());
 
