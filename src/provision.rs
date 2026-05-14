@@ -31,11 +31,7 @@ pub fn install_provisioning_profile(profile: &[u8]) -> Res<()> {
         error!("No classic device connection — trying RPPairing");
         if crate::rsd::is_rppairing_available() {
             return crate::RUNTIME
-                .block_on(crate::rsd::install_provisioning_profile_rppairing(profile))
-                .map_err(|e| {
-                    error!("RPPairing install failed: {:?}", e);
-                    Errors::ProfileInstall
-                });
+                .block_on(crate::rsd::install_provisioning_profile_rppairing(profile));
         }
         return Err(Errors::NoConnection);
     }
@@ -49,11 +45,7 @@ pub fn install_provisioning_profile(profile: &[u8]) -> Res<()> {
             if crate::rsd::is_rppairing_available() {
                 info!("Falling back to RPPairing for provisioning profile install");
                 return crate::RUNTIME
-                    .block_on(crate::rsd::install_provisioning_profile_rppairing(profile))
-                    .map_err(|e| {
-                        error!("RPPairing install failed: {:?}", e);
-                        Errors::ProfileInstall
-                    });
+                    .block_on(crate::rsd::install_provisioning_profile_rppairing(profile));
             }
             return Err(Errors::CreateMisagent);
         }
@@ -71,11 +63,7 @@ pub fn install_provisioning_profile(profile: &[u8]) -> Res<()> {
             if crate::rsd::is_rppairing_available() {
                 info!("Falling back to RPPairing for provisioning profile install");
                 return crate::RUNTIME
-                    .block_on(crate::rsd::install_provisioning_profile_rppairing(profile))
-                    .map_err(|e| {
-                        error!("RPPairing install failed: {:?}", e);
-                        Errors::ProfileInstall
-                    });
+                    .block_on(crate::rsd::install_provisioning_profile_rppairing(profile));
             }
             Err(Errors::ProfileInstall)
         }
@@ -92,11 +80,7 @@ pub fn remove_provisioning_profile(id: String) -> Res<()> {
         error!("No classic device connection — trying RPPairing");
         if crate::rsd::is_rppairing_available() {
             return crate::RUNTIME
-                .block_on(crate::rsd::remove_provisioning_profile_rppairing(id))
-                .map_err(|e| {
-                    error!("RPPairing remove failed: {:?}", e);
-                    Errors::ProfileRemove
-                });
+                .block_on(crate::rsd::remove_provisioning_profile_rppairing(id));
         }
         return Err(Errors::NoConnection);
     }
@@ -110,11 +94,7 @@ pub fn remove_provisioning_profile(id: String) -> Res<()> {
             if crate::rsd::is_rppairing_available() {
                 info!("Falling back to RPPairing for provisioning profile removal");
                 return crate::RUNTIME
-                    .block_on(crate::rsd::remove_provisioning_profile_rppairing(id))
-                    .map_err(|e| {
-                        error!("RPPairing remove failed: {:?}", e);
-                        Errors::ProfileRemove
-                    });
+                    .block_on(crate::rsd::remove_provisioning_profile_rppairing(id));
             }
             return Err(Errors::CreateMisagent);
         }
@@ -130,11 +110,7 @@ pub fn remove_provisioning_profile(id: String) -> Res<()> {
             if crate::rsd::is_rppairing_available() {
                 info!("Falling back to RPPairing for provisioning profile removal");
                 return crate::RUNTIME
-                    .block_on(crate::rsd::remove_provisioning_profile_rppairing(id))
-                    .map_err(|e| {
-                        error!("RPPairing remove failed: {:?}", e);
-                        Errors::ProfileRemove
-                    });
+                    .block_on(crate::rsd::remove_provisioning_profile_rppairing(id));
             }
             Err(Errors::ProfileRemove)
         }
