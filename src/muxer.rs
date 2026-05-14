@@ -345,6 +345,11 @@ pub fn startWithLogger(
         info!("Logger initialized!!");
     }
 
+    // Attempt to store as RPPairing file (iOS 17+). Non-fatal if not an RPPairing file.
+    if let Err(e) = crate::rsd::try_store_rppairing_file(pairing_file.as_bytes()) {
+        info!("Pairing file is not RPPairing format (classic lockdownd): {:?}", e);
+    }
+
     let pairing_file: Dictionary = match plist::from_bytes(pairing_file.as_bytes()) {
         Ok(p) => p,
         Err(e) => {
