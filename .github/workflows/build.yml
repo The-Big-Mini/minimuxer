@@ -38,6 +38,8 @@ jobs:
         xcode-version: 16.2
 
     - name: Build
+      env:
+        IPHONEOS_DEPLOYMENT_TARGET: "17.1"
       run: make zip
 
     - name: Upload to release
