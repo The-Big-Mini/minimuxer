@@ -23,6 +23,7 @@ mod jit;
 mod mounter;
 mod muxer;
 mod provision;
+mod rsd;
 mod raw_packet;
 #[cfg(test)]
 mod tests;
