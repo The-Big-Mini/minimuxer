@@ -100,7 +100,7 @@ pub fn remove_provisioning_profile(id: String) -> Res<()> {
         }
     };
 
-    match mis_client.remove(id) {
+    match mis_client.remove(&id) {
         Ok(_) => {
             info!("Successfully removed profile");
             Ok(())
