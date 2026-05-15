@@ -1,11 +1,13 @@
 name: Build minimuxer
 
-on: [push]
+on:
+  push:
+  workflow_dispatch:
 
 jobs:
   build:
     name: Build minimuxer
-    if: startsWith(github.event.head_commit.message, '[build]')
+    if: startsWith(github.event.head_commit.message, '[build]') || github.event_name == 'workflow_dispatch'
     concurrency:
       group: ${{ github.ref }}
       cancel-in-progress: true
