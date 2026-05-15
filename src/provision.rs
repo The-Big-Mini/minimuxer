@@ -67,7 +67,7 @@ async fn install_provisioning_profile_coredevice(profile: &[u8]) -> Res<()> {
     let misagent_stream = adapter.connect(misagent_port).await
         .map_err(|e| { error!("misagent stream connect: {:?}", e); Errors::CreateMisagent })?;
 
-    let mut client = MisagentClient::from_stream(Box::new(misagent_stream)).await
+    let mut client = <MisagentClient as idevice::RsdService>::from_stream(Box::new(misagent_stream)).await
         .map_err(|e| { error!("MisagentClient from_stream: {:?}", e); Errors::CreateMisagent })?;
 
     client.install(profile.to_vec()).await
@@ -120,7 +120,7 @@ async fn remove_provisioning_profile_coredevice(id: String) -> Res<()> {
     let misagent_stream = adapter.connect(misagent_port).await
         .map_err(|e| { error!("misagent stream connect: {:?}", e); Errors::CreateMisagent })?;
 
-    let mut client = MisagentClient::from_stream(Box::new(misagent_stream)).await
+    let mut client = <MisagentClient as idevice::RsdService>::from_stream(Box::new(misagent_stream)).await
         .map_err(|e| { error!("MisagentClient from_stream: {:?}", e); Errors::CreateMisagent })?;
 
     client.remove(&id).await

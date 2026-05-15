@@ -328,7 +328,7 @@ pub fn start_auto_mounter(docs_path: String) {
                         {
                             Some(d) => d.to_provider(idevice::usbmuxd::UsbmuxdAddr::TcpSocket(std::net::SocketAddr::V4(
                         SocketAddrV4::from_str("127.0.0.1:27015").unwrap(),
-                    )), 0, "asdf"),
+                    )), "asdf"),
                             None => {
                                 return Err(Errors::NoConnection);
                             }
@@ -339,6 +339,7 @@ pub fn start_auto_mounter(docs_path: String) {
                             addr: std::net::IpAddr::V4(Ipv4Addr::from_str("10.7.0.1").unwrap()),
                             pairing_file: dev.get_pairing_file().await.unwrap(),
                             label: "minimuxer".to_string(),
+                            scope_id: None,
                         };
 
                         info!("Connecting to lockdown for UCID");
@@ -352,7 +353,7 @@ pub fn start_auto_mounter(docs_path: String) {
                         };
 
                         info!("Fetching UCID");
-                        let unique_chip_id = match match lockdown_client.get_value("UniqueChipID").await {
+                        let unique_chip_id = match match lockdown_client.get_value(Some("UniqueChipID"), None).await {
                             Ok(u) => u,
                             Err(_) => {
                                 if let Err(e) = lockdown_client
@@ -362,7 +363,7 @@ pub fn start_auto_mounter(docs_path: String) {
                                         return Err(Errors::CreateLockdown);
                                 }
                                 match lockdown_client
-                                    .get_value("UniqueChipID")
+                                    .get_value(Some("UniqueChipID"), None)
                                     .await {
                                     Ok(l) => l,
                                     Err(e) => {

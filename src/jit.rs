@@ -214,6 +214,7 @@ pub fn debug_app(app_id: String) -> Res<()> {
                 addr: std::net::IpAddr::V4(Ipv4Addr::from_str("10.7.0.1").unwrap()),
                 pairing_file: dev.get_pairing_file().await.unwrap(),
                 label: "minimuxer".to_string(),
+                scope_id: None,
             };
 
             let proxy = match CoreDeviceProxy::connect(&provider).await {
