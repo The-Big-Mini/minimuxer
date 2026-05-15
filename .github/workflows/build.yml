@@ -20,13 +20,9 @@ jobs:
       uses: actions/checkout@v3
 
     - name: Install rust
-      uses: actions-rs/toolchain@v1
+      uses: dtolnay/rust-toolchain@stable
       with:
-        toolchain: stable
-        profile: minimal
-
-    - name: Install rust targets for iOS
-      run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+        targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
 
     - name: Install bindgen for aws-lc
       run: cargo install --force --locked bindgen-cli
