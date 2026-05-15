@@ -21,6 +21,112 @@ mod ffi {
     }
 }
 
+async fn install_provisioning_profile_coredevice(profile: &[u8]) -> Res<()> {
+    use idevice::{
+        IdeviceService, RsdService,
+        rsd::RsdHandshake,
+        services::{core_device_proxy::CoreDeviceProxy, misagent::MisagentClient},
+        usbmuxd::{UsbmuxdAddr, UsbmuxdConnection},
+    };
+
+    info!("Trying CoreDevice (iOS 17+) path for provisioning profile install");
+
+    let mut uc = UsbmuxdConnection::default().await
+        .map_err(|e| { error!("usbmuxd connect: {:?}", e); Errors::NoConnection })?;
+
+    let provider = uc.get_devices().await
+        .ok()
+        .and_then(|x| x.into_iter().next())
+        .ok_or_else(|| { error!("no usbmuxd device found"); Errors::NoConnection })?
+        .to_provider(UsbmuxdAddr::default(), "minimuxer-provision");
+
+    let proxy = CoreDeviceProxy::connect(&provider).await
+        .map_err(|e| { error!("CoreDeviceProxy connect: {:?}", e); Errors::CreateCoreDevice })?;
+
+    let rsd_port = proxy.tunnel_info().server_rsd_port;
+    let mut adapter = proxy.create_software_tunnel()
+        .map_err(|e| { error!("create_software_tunnel: {:?}", e); Errors::CreateSoftwareTunnel })?
+        .to_async_handle();
+
+    let rsd_stream = adapter.connect(rsd_port).await
+        .map_err(|e| { error!("RSD connect: {:?}", e); Errors::Connect })?;
+
+    let handshake = RsdHandshake::new(rsd_stream).await
+        .map_err(|e| { error!("RSD handshake: {:?}", e); Errors::XpcHandshake })?;
+
+    let misagent_port = handshake.services
+        .get("com.apple.misagent.shim.remote")
+        .ok_or_else(|| {
+            error!("misagent.shim.remote not found in RSD services");
+            Errors::CreateMisagent
+        })?
+        .port;
+
+    drop(handshake);
+
+    let misagent_stream = adapter.connect(misagent_port).await
+        .map_err(|e| { error!("misagent stream connect: {:?}", e); Errors::CreateMisagent })?;
+
+    let mut client = MisagentClient::from_stream(Box::new(misagent_stream)).await
+        .map_err(|e| { error!("MisagentClient from_stream: {:?}", e); Errors::CreateMisagent })?;
+
+    client.install(profile.to_vec()).await
+        .map_err(|e| { error!("CoreDevice misagent install: {:?}", e); Errors::ProfileInstall })
+}
+
+async fn remove_provisioning_profile_coredevice(id: String) -> Res<()> {
+    use idevice::{
+        IdeviceService, RsdService,
+        rsd::RsdHandshake,
+        services::{core_device_proxy::CoreDeviceProxy, misagent::MisagentClient},
+        usbmuxd::{UsbmuxdAddr, UsbmuxdConnection},
+    };
+
+    info!("Trying CoreDevice (iOS 17+) path for provisioning profile remove");
+
+    let mut uc = UsbmuxdConnection::default().await
+        .map_err(|e| { error!("usbmuxd connect: {:?}", e); Errors::NoConnection })?;
+
+    let provider = uc.get_devices().await
+        .ok()
+        .and_then(|x| x.into_iter().next())
+        .ok_or_else(|| { error!("no usbmuxd device found"); Errors::NoConnection })?
+        .to_provider(UsbmuxdAddr::default(), "minimuxer-provision");
+
+    let proxy = CoreDeviceProxy::connect(&provider).await
+        .map_err(|e| { error!("CoreDeviceProxy connect: {:?}", e); Errors::CreateCoreDevice })?;
+
+    let rsd_port = proxy.tunnel_info().server_rsd_port;
+    let mut adapter = proxy.create_software_tunnel()
+        .map_err(|e| { error!("create_software_tunnel: {:?}", e); Errors::CreateSoftwareTunnel })?
+        .to_async_handle();
+
+    let rsd_stream = adapter.connect(rsd_port).await
+        .map_err(|e| { error!("RSD connect: {:?}", e); Errors::Connect })?;
+
+    let handshake = RsdHandshake::new(rsd_stream).await
+        .map_err(|e| { error!("RSD handshake: {:?}", e); Errors::XpcHandshake })?;
+
+    let misagent_port = handshake.services
+        .get("com.apple.misagent.shim.remote")
+        .ok_or_else(|| {
+            error!("misagent.shim.remote not found in RSD services");
+            Errors::CreateMisagent
+        })?
+        .port;
+
+    drop(handshake);
+
+    let misagent_stream = adapter.connect(misagent_port).await
+        .map_err(|e| { error!("misagent stream connect: {:?}", e); Errors::CreateMisagent })?;
+
+    let mut client = MisagentClient::from_stream(Box::new(misagent_stream)).await
+        .map_err(|e| { error!("MisagentClient from_stream: {:?}", e); Errors::CreateMisagent })?;
+
+    client.remove(&id).await
+        .map_err(|e| { error!("CoreDevice misagent remove: {:?}", e); Errors::ProfileRemove })
+}
+
 // TODO: take a vec of provisioning profiles and remove old ones like AltServer
 /// Installs a provisioning profile on the device
 // pub fn install_provisioning_profile(profile: Vec<&[u8]>, bundle_ids: Vec<String>) -> Result<()> {
@@ -28,7 +134,11 @@ pub fn install_provisioning_profile(profile: &[u8]) -> Res<()> {
     info!("Installing provisioning profile");
 
     if !test_device_connection() {
-        error!("No classic device connection — trying RPPairing");
+        error!("No classic device connection — trying CoreDevice path");
+        match crate::RUNTIME.block_on(install_provisioning_profile_coredevice(profile)) {
+            Ok(()) => return Ok(()),
+            Err(e) => error!("CoreDevice install failed: {:?}", e),
+        }
         if crate::rsd::is_rppairing_available() {
             return crate::RUNTIME
                 .block_on(crate::rsd::install_provisioning_profile_rppairing(profile));
@@ -42,6 +152,11 @@ pub fn install_provisioning_profile(profile: &[u8]) -> Res<()> {
         Ok(m) => m,
         Err(e) => {
             error!("Failed to start classic misagent client: {:?}", e);
+            info!("Falling back to CoreDevice path for provisioning profile install");
+            match crate::RUNTIME.block_on(install_provisioning_profile_coredevice(profile)) {
+                Ok(()) => return Ok(()),
+                Err(e2) => error!("CoreDevice install also failed: {:?}", e2),
+            }
             if crate::rsd::is_rppairing_available() {
                 info!("Falling back to RPPairing for provisioning profile install");
                 return crate::RUNTIME
@@ -60,6 +175,11 @@ pub fn install_provisioning_profile(profile: &[u8]) -> Res<()> {
         }
         Err(e) => {
             error!("Classic misagent install failed: {:?}", e);
+            info!("Falling back to CoreDevice path for provisioning profile install");
+            match crate::RUNTIME.block_on(install_provisioning_profile_coredevice(profile)) {
+                Ok(()) => return Ok(()),
+                Err(e2) => error!("CoreDevice install also failed: {:?}", e2),
+            }
             if crate::rsd::is_rppairing_available() {
                 info!("Falling back to RPPairing for provisioning profile install");
                 return crate::RUNTIME
@@ -77,7 +197,11 @@ pub fn remove_provisioning_profile(id: String) -> Res<()> {
     info!("Removing profile with ID: {}", id);
 
     if !test_device_connection() {
-        error!("No classic device connection — trying RPPairing");
+        error!("No classic device connection — trying CoreDevice path");
+        match crate::RUNTIME.block_on(remove_provisioning_profile_coredevice(id.clone())) {
+            Ok(()) => return Ok(()),
+            Err(e) => error!("CoreDevice remove failed: {:?}", e),
+        }
         if crate::rsd::is_rppairing_available() {
             return crate::RUNTIME
                 .block_on(crate::rsd::remove_provisioning_profile_rppairing(id));
@@ -91,6 +215,11 @@ pub fn remove_provisioning_profile(id: String) -> Res<()> {
         Ok(m) => m,
         Err(e) => {
             error!("Failed to start classic misagent client: {:?}", e);
+            info!("Falling back to CoreDevice path for provisioning profile removal");
+            match crate::RUNTIME.block_on(remove_provisioning_profile_coredevice(id.clone())) {
+                Ok(()) => return Ok(()),
+                Err(e2) => error!("CoreDevice remove also failed: {:?}", e2),
+            }
             if crate::rsd::is_rppairing_available() {
                 info!("Falling back to RPPairing for provisioning profile removal");
                 return crate::RUNTIME
@@ -107,6 +236,11 @@ pub fn remove_provisioning_profile(id: String) -> Res<()> {
         }
         Err(e) => {
             error!("Classic misagent remove failed: {:?}", e);
+            info!("Falling back to CoreDevice path for provisioning profile removal");
+            match crate::RUNTIME.block_on(remove_provisioning_profile_coredevice(id.clone())) {
+                Ok(()) => return Ok(()),
+                Err(e2) => error!("CoreDevice remove also failed: {:?}", e2),
+            }
             if crate::rsd::is_rppairing_available() {
                 info!("Falling back to RPPairing for provisioning profile removal");
                 return crate::RUNTIME
