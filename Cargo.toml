@@ -11,7 +11,7 @@ rusty_libimobiledevice = { git = "https://github.com/SideStore/rusty_libimobiled
 idevice = { git = "https://github.com/jkcoxson/idevice", rev = "a714d35d95dc16769f8a54a6168ccec6338b73c7", features = ["full"] }
 
 plist_plus = { version = "0.2", features = ["dynamic"] }
-plist = "1"
+plist = "1.8"
 swift-bridge = { git = "https://github.com/naturecodevoid/swift-bridge" } # TODO: change to official repo once https://github.com/chinedufn/swift-bridge/pull/209 is merged
 
 log = "*"
