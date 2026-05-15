@@ -38,16 +38,30 @@ jobs:
       run: make zip
 
     - name: Upload to release
-      uses: IsaacShelton/update-existing-release@v1.3.1
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        release: "Build"
-        tag: "build"
-        files: |
-          minimuxer.xcframework.zip
-          generated.zip
-          target/libminimuxer-ios.a
-          target/libminimuxer-sim.a
-        body: |
-          Commit: https://github.com/${{ github.repository }}/commit/${{ github.sha }}
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        BODY="Commit: https://github.com/${{ github.repository }}/commit/${{ github.sha }}"
+        if gh release view build --repo "${{ github.repository }}" > /dev/null 2>&1; then
+          gh release edit build \
+            --repo "${{ github.repository }}" \
+            --title "Build" \
+            --notes "$BODY"
+          gh release upload build \
+            --repo "${{ github.repository }}" \
+            --clobber \
+            minimuxer.xcframework.zip \
+            generated.zip \
+            target/libminimuxer-ios.a \
+            target/libminimuxer-sim.a
+        else
+          gh release create build \
+            --repo "${{ github.repository }}" \
+            --title "Build" \
+            --notes "$BODY" \
+            minimuxer.xcframework.zip \
+            generated.zip \
+            target/libminimuxer-ios.a \
+            target/libminimuxer-sim.a
+        fi
 # trigger: RPPairing + set_device_ip release
