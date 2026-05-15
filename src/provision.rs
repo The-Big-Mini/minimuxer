@@ -22,9 +22,9 @@ mod ffi {
 }
 
 async fn install_provisioning_profile_coredevice(profile: &[u8]) -> Res<()> {
-    use std::{net::Ipv4Addr, str::FromStr};
+    use std::{net::{Ipv4Addr, SocketAddrV4}, str::FromStr};
     use idevice::{
-        IdeviceService, RsdService,
+        IdeviceService,
         provider::{IdeviceProvider, TcpProvider},
         rsd::RsdHandshake,
         services::{core_device_proxy::CoreDeviceProxy, misagent::MisagentClient},
@@ -44,7 +44,13 @@ async fn install_provisioning_profile_coredevice(profile: &[u8]) -> Res<()> {
     let dev = uc.get_devices().await
         .ok()
         .and_then(|x| x.into_iter().next())
-        .ok_or_else(|| { error!("no usbmuxd device found"); Errors::NoConnection })?;
+        .ok_or_else(|| { error!("no usbmuxd device found"); Errors::NoConnection })?
+        .to_provider(
+            idevice::usbmuxd::UsbmuxdAddr::TcpSocket(std::net::SocketAddr::V4(
+                SocketAddrV4::from_str("127.0.0.1:27015").unwrap(),
+            )),
+            "minimuxer-provision",
+        );
 
     let provider = TcpProvider {
         addr: std::net::IpAddr::V4(Ipv4Addr::from_str("10.7.0.1").unwrap()),
@@ -89,9 +95,9 @@ async fn install_provisioning_profile_coredevice(profile: &[u8]) -> Res<()> {
 }
 
 async fn remove_provisioning_profile_coredevice(id: String) -> Res<()> {
-    use std::{net::Ipv4Addr, str::FromStr};
+    use std::{net::{Ipv4Addr, SocketAddrV4}, str::FromStr};
     use idevice::{
-        IdeviceService, RsdService,
+        IdeviceService,
         provider::{IdeviceProvider, TcpProvider},
         rsd::RsdHandshake,
         services::{core_device_proxy::CoreDeviceProxy, misagent::MisagentClient},
@@ -111,7 +117,13 @@ async fn remove_provisioning_profile_coredevice(id: String) -> Res<()> {
     let dev = uc.get_devices().await
         .ok()
         .and_then(|x| x.into_iter().next())
-        .ok_or_else(|| { error!("no usbmuxd device found"); Errors::NoConnection })?;
+        .ok_or_else(|| { error!("no usbmuxd device found"); Errors::NoConnection })?
+        .to_provider(
+            idevice::usbmuxd::UsbmuxdAddr::TcpSocket(std::net::SocketAddr::V4(
+                SocketAddrV4::from_str("127.0.0.1:27015").unwrap(),
+            )),
+            "minimuxer-provision",
+        );
 
     let provider = TcpProvider {
         addr: std::net::IpAddr::V4(Ipv4Addr::from_str("10.7.0.1").unwrap()),
