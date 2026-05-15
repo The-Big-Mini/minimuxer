@@ -22,23 +22,37 @@ mod ffi {
 }
 
 async fn install_provisioning_profile_coredevice(profile: &[u8]) -> Res<()> {
+    use std::{net::Ipv4Addr, str::FromStr};
     use idevice::{
         IdeviceService, RsdService,
+        provider::{IdeviceProvider, TcpProvider},
         rsd::RsdHandshake,
         services::{core_device_proxy::CoreDeviceProxy, misagent::MisagentClient},
-        usbmuxd::{UsbmuxdAddr, UsbmuxdConnection},
+        usbmuxd::UsbmuxdConnection,
     };
 
     info!("Trying CoreDevice (iOS 17+) path for provisioning profile install");
 
-    let mut uc = UsbmuxdConnection::default().await
-        .map_err(|e| { error!("usbmuxd connect: {:?}", e); Errors::NoConnection })?;
+    let mut uc = UsbmuxdConnection::new(
+        Box::new(
+            tokio::net::TcpStream::connect("127.0.0.1:27015").await
+                .map_err(|e| { error!("usbmuxd TCP connect: {:?}", e); Errors::NoConnection })?,
+        ),
+        0,
+    );
 
-    let provider = uc.get_devices().await
+    let dev = uc.get_devices().await
         .ok()
         .and_then(|x| x.into_iter().next())
-        .ok_or_else(|| { error!("no usbmuxd device found"); Errors::NoConnection })?
-        .to_provider(UsbmuxdAddr::default(), "minimuxer-provision");
+        .ok_or_else(|| { error!("no usbmuxd device found"); Errors::NoConnection })?;
+
+    let provider = TcpProvider {
+        addr: std::net::IpAddr::V4(Ipv4Addr::from_str("10.7.0.1").unwrap()),
+        pairing_file: dev.get_pairing_file().await
+            .map_err(|e| { error!("get_pairing_file: {:?}", e); Errors::PairingFile })?,
+        label: "minimuxer-provision".to_string(),
+        scope_id: None,
+    };
 
     let proxy = CoreDeviceProxy::connect(&provider).await
         .map_err(|e| { error!("CoreDeviceProxy connect: {:?}", e); Errors::CreateCoreDevice })?;
@@ -75,23 +89,37 @@ async fn install_provisioning_profile_coredevice(profile: &[u8]) -> Res<()> {
 }
 
 async fn remove_provisioning_profile_coredevice(id: String) -> Res<()> {
+    use std::{net::Ipv4Addr, str::FromStr};
     use idevice::{
         IdeviceService, RsdService,
+        provider::{IdeviceProvider, TcpProvider},
         rsd::RsdHandshake,
         services::{core_device_proxy::CoreDeviceProxy, misagent::MisagentClient},
-        usbmuxd::{UsbmuxdAddr, UsbmuxdConnection},
+        usbmuxd::UsbmuxdConnection,
     };
 
     info!("Trying CoreDevice (iOS 17+) path for provisioning profile remove");
 
-    let mut uc = UsbmuxdConnection::default().await
-        .map_err(|e| { error!("usbmuxd connect: {:?}", e); Errors::NoConnection })?;
+    let mut uc = UsbmuxdConnection::new(
+        Box::new(
+            tokio::net::TcpStream::connect("127.0.0.1:27015").await
+                .map_err(|e| { error!("usbmuxd TCP connect: {:?}", e); Errors::NoConnection })?,
+        ),
+        0,
+    );
 
-    let provider = uc.get_devices().await
+    let dev = uc.get_devices().await
         .ok()
         .and_then(|x| x.into_iter().next())
-        .ok_or_else(|| { error!("no usbmuxd device found"); Errors::NoConnection })?
-        .to_provider(UsbmuxdAddr::default(), "minimuxer-provision");
+        .ok_or_else(|| { error!("no usbmuxd device found"); Errors::NoConnection })?;
+
+    let provider = TcpProvider {
+        addr: std::net::IpAddr::V4(Ipv4Addr::from_str("10.7.0.1").unwrap()),
+        pairing_file: dev.get_pairing_file().await
+            .map_err(|e| { error!("get_pairing_file: {:?}", e); Errors::PairingFile })?,
+        label: "minimuxer-provision".to_string(),
+        scope_id: None,
+    };
 
     let proxy = CoreDeviceProxy::connect(&provider).await
         .map_err(|e| { error!("CoreDeviceProxy connect: {:?}", e); Errors::CreateCoreDevice })?;
