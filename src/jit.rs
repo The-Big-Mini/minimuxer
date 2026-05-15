@@ -10,7 +10,6 @@ use idevice::{
     core_device_proxy::CoreDeviceProxy,
     debug_proxy::DebugProxyClient,
     provider::{IdeviceProvider, TcpProvider},
-    rsd::RsdHandshake,
     usbmuxd::UsbmuxdConnection,
     IdeviceService,
 };
@@ -203,6 +202,7 @@ pub fn debug_app(app_id: String) -> Res<()> {
                     idevice::usbmuxd::UsbmuxdAddr::TcpSocket(std::net::SocketAddr::V4(
                         SocketAddrV4::from_str("127.0.0.1:27015").unwrap(),
                     )),
+                    0,
                     "asdf",
                 ),
                 None => {
@@ -214,7 +214,6 @@ pub fn debug_app(app_id: String) -> Res<()> {
                 addr: std::net::IpAddr::V4(Ipv4Addr::from_str("10.7.0.1").unwrap()),
                 pairing_file: dev.get_pairing_file().await.unwrap(),
                 label: "minimuxer".to_string(),
-                scope_id: None,
             };
 
             let proxy = match CoreDeviceProxy::connect(&provider).await {
@@ -225,57 +224,55 @@ pub fn debug_app(app_id: String) -> Res<()> {
                 }
             };
 
-            let rsd_port = proxy.tunnel_info().server_rsd_port;
+            let rsd_port = proxy.handshake.server_rsd_port;
             let mut adapter = match proxy.create_software_tunnel() {
-                Ok(a) => a.to_async_handle(),
+                Ok(a) => a,
                 Err(e) => {
                     error!("Failed to create software tunnel: {:?}", e);
                     return Err(Errors::CreateSoftwareTunnel);
                 }
             };
 
-            let rsd_stream = match adapter.connect(rsd_port).await {
-                Ok(s) => s,
-                Err(e) => {
-                    error!("Failed to connect to RSD port: {:?}", e);
-                    return Err(Errors::Connect);
-                }
-            };
+            if let Err(e) = adapter.connect(rsd_port).await {
+                error!("Failed to connect to RemoteXPC port: {:?}", e);
+                return Err(Errors::Connect);
+            }
 
-            let handshake = match RsdHandshake::new(rsd_stream).await {
+            let xpc_client = match idevice::xpc::XPCDevice::new(adapter).await {
                 Ok(x) => x,
                 Err(e) => {
-                    log::warn!("Failed to complete RSD handshake: {e:?}");
+                    log::warn!("Failed to get services: {e:?}");
                     return Err(Errors::XpcHandshake);
                 }
             };
 
-            let dvt_port = match handshake.services.get("com.apple.instruments.dtservicehub") {
+            let dvt_port = match xpc_client.services.get(idevice::dvt::SERVICE_NAME) {
                 Some(s) => s.port,
                 None => {
                     return Err(Errors::NoService);
                 }
             };
-            let debug_proxy_port =
-                match handshake.services.get("com.apple.internal.dt.remote.debugproxy") {
-                    Some(s) => s.port,
-                    None => {
-                        return Err(Errors::NoService);
-                    }
-                };
-
-            drop(handshake);
-
-            info!("Connecting to DVT port");
-            let dvt_stream = match adapter.connect(dvt_port).await {
-                Ok(s) => s,
-                Err(e) => {
-                    log::warn!("Failed to connect to DVT port: {e:?}");
-                    return Err(Errors::Connect);
+            let debug_proxy_port = match xpc_client.services.get(idevice::debug_proxy::SERVICE_NAME)
+            {
+                Some(s) => s.port,
+                None => {
+                    return Err(Errors::NoService);
                 }
             };
 
-            let mut rs_client = idevice::dvt::remote_server::RemoteServerClient::new(dvt_stream);
+            let mut adapter = xpc_client.into_inner();
+            if let Err(e) = adapter.close().await {
+                log::warn!("Failed to close RemoteXPC port: {e:?}");
+                return Err(Errors::Close);
+            }
+
+            info!("Connecting to DVT port");
+            if let Err(e) = adapter.connect(dvt_port).await {
+                log::warn!("Failed to connect to DVT port: {e:?}");
+                return Err(Errors::Connect);
+            }
+
+            let mut rs_client = idevice::dvt::remote_server::RemoteServerClient::new(adapter);
             if let Err(e) = rs_client.read_message(0).await {
                 log::warn!("Failed to read first message from remote server client: {e:?}");
                 return Err(Errors::CreateRemoteServer);
@@ -305,19 +302,19 @@ pub fn debug_app(app_id: String) -> Res<()> {
                 log::warn!("Failed to disable memory limit: {e:?}")
             }
 
-            drop(pc_client);
-            drop(rs_client);
+            let mut adapter = rs_client.into_inner();
+            if let Err(e) = adapter.close().await {
+                log::warn!("Failed to close DVT port: {e:?}");
+                return Err(Errors::Close);
+            }
 
             info!("Connecting to debug proxy port: {debug_proxy_port}");
-            let debug_stream = match adapter.connect(debug_proxy_port).await {
-                Ok(s) => s,
-                Err(e) => {
-                    log::warn!("Failed to connect to debug proxy port: {e:?}");
-                    return Err(Errors::CreateDebug);
-                }
-            };
+            if let Err(e) = adapter.connect(debug_proxy_port).await {
+                log::warn!("Failed to connect to debug proxy port: {e:?}");
+                return Err(Errors::CreateDebug);
+            }
 
-            let mut dp = DebugProxyClient::new(debug_stream);
+            let mut dp = DebugProxyClient::new(adapter);
             let commands = [
                 format!("vAttach;{pid:02X}"),
                 "D".to_string(),

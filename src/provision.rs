@@ -21,168 +21,13 @@ mod ffi {
     }
 }
 
-async fn install_provisioning_profile_coredevice(profile: &[u8]) -> Res<()> {
-    use std::{net::{Ipv4Addr, SocketAddrV4}, str::FromStr};
-    use idevice::{
-        IdeviceService,
-        provider::{IdeviceProvider, TcpProvider},
-        rsd::RsdHandshake,
-        services::{core_device_proxy::CoreDeviceProxy, misagent::MisagentClient},
-        usbmuxd::UsbmuxdConnection,
-    };
-
-    info!("Trying CoreDevice (iOS 17+) path for provisioning profile install");
-
-    let mut uc = UsbmuxdConnection::new(
-        Box::new(
-            tokio::net::TcpStream::connect("127.0.0.1:27015").await
-                .map_err(|e| { error!("usbmuxd TCP connect: {:?}", e); Errors::NoConnection })?,
-        ),
-        0,
-    );
-
-    let dev = uc.get_devices().await
-        .ok()
-        .and_then(|x| x.into_iter().next())
-        .ok_or_else(|| { error!("no usbmuxd device found"); Errors::NoConnection })?
-        .to_provider(
-            idevice::usbmuxd::UsbmuxdAddr::TcpSocket(std::net::SocketAddr::V4(
-                SocketAddrV4::from_str("127.0.0.1:27015").unwrap(),
-            )),
-            "minimuxer-provision",
-        );
-
-    let provider = TcpProvider {
-        addr: std::net::IpAddr::V4(Ipv4Addr::from_str("10.7.0.1").unwrap()),
-        pairing_file: dev.get_pairing_file().await
-            .map_err(|e| { error!("get_pairing_file: {:?}", e); Errors::PairingFile })?,
-        label: "minimuxer-provision".to_string(),
-        scope_id: None,
-    };
-
-    let proxy = CoreDeviceProxy::connect(&provider).await
-        .map_err(|e| { error!("CoreDeviceProxy connect: {:?}", e); Errors::CreateCoreDevice })?;
-
-    let rsd_port = proxy.tunnel_info().server_rsd_port;
-    let mut adapter = proxy.create_software_tunnel()
-        .map_err(|e| { error!("create_software_tunnel: {:?}", e); Errors::CreateSoftwareTunnel })?
-        .to_async_handle();
-
-    let rsd_stream = adapter.connect(rsd_port).await
-        .map_err(|e| { error!("RSD connect: {:?}", e); Errors::Connect })?;
-
-    let handshake = RsdHandshake::new(rsd_stream).await
-        .map_err(|e| { error!("RSD handshake: {:?}", e); Errors::XpcHandshake })?;
-
-    let misagent_port = handshake.services
-        .get("com.apple.misagent.shim.remote")
-        .ok_or_else(|| {
-            error!("misagent.shim.remote not found in RSD services");
-            Errors::CreateMisagent
-        })?
-        .port;
-
-    drop(handshake);
-
-    let misagent_stream = adapter.connect(misagent_port).await
-        .map_err(|e| { error!("misagent stream connect: {:?}", e); Errors::CreateMisagent })?;
-
-    let mut client = <MisagentClient as idevice::RsdService>::from_stream(Box::new(misagent_stream)).await
-        .map_err(|e| { error!("MisagentClient from_stream: {:?}", e); Errors::CreateMisagent })?;
-
-    client.install(profile.to_vec()).await
-        .map_err(|e| { error!("CoreDevice misagent install: {:?}", e); Errors::ProfileInstall })
-}
-
-async fn remove_provisioning_profile_coredevice(id: String) -> Res<()> {
-    use std::{net::{Ipv4Addr, SocketAddrV4}, str::FromStr};
-    use idevice::{
-        IdeviceService,
-        provider::{IdeviceProvider, TcpProvider},
-        rsd::RsdHandshake,
-        services::{core_device_proxy::CoreDeviceProxy, misagent::MisagentClient},
-        usbmuxd::UsbmuxdConnection,
-    };
-
-    info!("Trying CoreDevice (iOS 17+) path for provisioning profile remove");
-
-    let mut uc = UsbmuxdConnection::new(
-        Box::new(
-            tokio::net::TcpStream::connect("127.0.0.1:27015").await
-                .map_err(|e| { error!("usbmuxd TCP connect: {:?}", e); Errors::NoConnection })?,
-        ),
-        0,
-    );
-
-    let dev = uc.get_devices().await
-        .ok()
-        .and_then(|x| x.into_iter().next())
-        .ok_or_else(|| { error!("no usbmuxd device found"); Errors::NoConnection })?
-        .to_provider(
-            idevice::usbmuxd::UsbmuxdAddr::TcpSocket(std::net::SocketAddr::V4(
-                SocketAddrV4::from_str("127.0.0.1:27015").unwrap(),
-            )),
-            "minimuxer-provision",
-        );
-
-    let provider = TcpProvider {
-        addr: std::net::IpAddr::V4(Ipv4Addr::from_str("10.7.0.1").unwrap()),
-        pairing_file: dev.get_pairing_file().await
-            .map_err(|e| { error!("get_pairing_file: {:?}", e); Errors::PairingFile })?,
-        label: "minimuxer-provision".to_string(),
-        scope_id: None,
-    };
-
-    let proxy = CoreDeviceProxy::connect(&provider).await
-        .map_err(|e| { error!("CoreDeviceProxy connect: {:?}", e); Errors::CreateCoreDevice })?;
-
-    let rsd_port = proxy.tunnel_info().server_rsd_port;
-    let mut adapter = proxy.create_software_tunnel()
-        .map_err(|e| { error!("create_software_tunnel: {:?}", e); Errors::CreateSoftwareTunnel })?
-        .to_async_handle();
-
-    let rsd_stream = adapter.connect(rsd_port).await
-        .map_err(|e| { error!("RSD connect: {:?}", e); Errors::Connect })?;
-
-    let handshake = RsdHandshake::new(rsd_stream).await
-        .map_err(|e| { error!("RSD handshake: {:?}", e); Errors::XpcHandshake })?;
-
-    let misagent_port = handshake.services
-        .get("com.apple.misagent.shim.remote")
-        .ok_or_else(|| {
-            error!("misagent.shim.remote not found in RSD services");
-            Errors::CreateMisagent
-        })?
-        .port;
-
-    drop(handshake);
-
-    let misagent_stream = adapter.connect(misagent_port).await
-        .map_err(|e| { error!("misagent stream connect: {:?}", e); Errors::CreateMisagent })?;
-
-    let mut client = <MisagentClient as idevice::RsdService>::from_stream(Box::new(misagent_stream)).await
-        .map_err(|e| { error!("MisagentClient from_stream: {:?}", e); Errors::CreateMisagent })?;
-
-    client.remove(&id).await
-        .map_err(|e| { error!("CoreDevice misagent remove: {:?}", e); Errors::ProfileRemove })
-}
-
 // TODO: take a vec of provisioning profiles and remove old ones like AltServer
 /// Installs a provisioning profile on the device
-// pub fn install_provisioning_profile(profile: Vec<&[u8]>, bundle_ids: Vec<String>) -> Result<()> {
 pub fn install_provisioning_profile(profile: &[u8]) -> Res<()> {
     info!("Installing provisioning profile");
 
     if !test_device_connection() {
-        error!("No classic device connection — trying CoreDevice path");
-        match crate::RUNTIME.block_on(install_provisioning_profile_coredevice(profile)) {
-            Ok(()) => return Ok(()),
-            Err(e) => error!("CoreDevice install failed: {:?}", e),
-        }
-        if crate::rsd::is_rppairing_available() {
-            return crate::RUNTIME
-                .block_on(crate::rsd::install_provisioning_profile_rppairing(profile));
-        }
+        error!("No device connection");
         return Err(Errors::NoConnection);
     }
 
@@ -191,17 +36,7 @@ pub fn install_provisioning_profile(profile: &[u8]) -> Res<()> {
     let mis_client = match device.new_misagent_client("minimuxer-install-prov") {
         Ok(m) => m,
         Err(e) => {
-            error!("Failed to start classic misagent client: {:?}", e);
-            info!("Falling back to CoreDevice path for provisioning profile install");
-            match crate::RUNTIME.block_on(install_provisioning_profile_coredevice(profile)) {
-                Ok(()) => return Ok(()),
-                Err(e2) => error!("CoreDevice install also failed: {:?}", e2),
-            }
-            if crate::rsd::is_rppairing_available() {
-                info!("Falling back to RPPairing for provisioning profile install");
-                return crate::RUNTIME
-                    .block_on(crate::rsd::install_provisioning_profile_rppairing(profile));
-            }
+            error!("Failed to start misagent client: {:?}", e);
             return Err(Errors::CreateMisagent);
         }
     };
@@ -214,17 +49,7 @@ pub fn install_provisioning_profile(profile: &[u8]) -> Res<()> {
             Ok(())
         }
         Err(e) => {
-            error!("Classic misagent install failed: {:?}", e);
-            info!("Falling back to CoreDevice path for provisioning profile install");
-            match crate::RUNTIME.block_on(install_provisioning_profile_coredevice(profile)) {
-                Ok(()) => return Ok(()),
-                Err(e2) => error!("CoreDevice install also failed: {:?}", e2),
-            }
-            if crate::rsd::is_rppairing_available() {
-                info!("Falling back to RPPairing for provisioning profile install");
-                return crate::RUNTIME
-                    .block_on(crate::rsd::install_provisioning_profile_rppairing(profile));
-            }
+            error!("Unable to install provisioning profile: {:?}", e);
             Err(Errors::ProfileInstall)
         }
     }
@@ -237,15 +62,7 @@ pub fn remove_provisioning_profile(id: String) -> Res<()> {
     info!("Removing profile with ID: {}", id);
 
     if !test_device_connection() {
-        error!("No classic device connection — trying CoreDevice path");
-        match crate::RUNTIME.block_on(remove_provisioning_profile_coredevice(id.clone())) {
-            Ok(()) => return Ok(()),
-            Err(e) => error!("CoreDevice remove failed: {:?}", e),
-        }
-        if crate::rsd::is_rppairing_available() {
-            return crate::RUNTIME
-                .block_on(crate::rsd::remove_provisioning_profile_rppairing(id));
-        }
+        error!("No device connection");
         return Err(Errors::NoConnection);
     }
 
@@ -254,38 +71,18 @@ pub fn remove_provisioning_profile(id: String) -> Res<()> {
     let mis_client = match device.new_misagent_client("minimuxer-install-prov") {
         Ok(m) => m,
         Err(e) => {
-            error!("Failed to start classic misagent client: {:?}", e);
-            info!("Falling back to CoreDevice path for provisioning profile removal");
-            match crate::RUNTIME.block_on(remove_provisioning_profile_coredevice(id.clone())) {
-                Ok(()) => return Ok(()),
-                Err(e2) => error!("CoreDevice remove also failed: {:?}", e2),
-            }
-            if crate::rsd::is_rppairing_available() {
-                info!("Falling back to RPPairing for provisioning profile removal");
-                return crate::RUNTIME
-                    .block_on(crate::rsd::remove_provisioning_profile_rppairing(id));
-            }
+            error!("Failed to start misagent client: {:?}", e);
             return Err(Errors::CreateMisagent);
         }
     };
 
-    match mis_client.remove(&id) {
+    match mis_client.remove(id) {
         Ok(_) => {
             info!("Successfully removed profile");
             Ok(())
         }
         Err(e) => {
-            error!("Classic misagent remove failed: {:?}", e);
-            info!("Falling back to CoreDevice path for provisioning profile removal");
-            match crate::RUNTIME.block_on(remove_provisioning_profile_coredevice(id.clone())) {
-                Ok(()) => return Ok(()),
-                Err(e2) => error!("CoreDevice remove also failed: {:?}", e2),
-            }
-            if crate::rsd::is_rppairing_available() {
-                info!("Falling back to RPPairing for provisioning profile removal");
-                return crate::RUNTIME
-                    .block_on(crate::rsd::remove_provisioning_profile_rppairing(id));
-            }
+            error!("Unable to remove provisioning profile: {:?}", e);
             Err(Errors::ProfileRemove)
         }
     }
@@ -349,7 +146,6 @@ pub fn dump_profiles(docs_path: String) -> Res<String> {
         const PLIST_PREFIX: &[u8] = b"<?xml version=";
         const PLIST_SUFFIX: &[u8] = b"</plist>";
 
-        // Get indexes of plist data prefix and suffix using windows
         let prefix = match data
             .windows(PLIST_PREFIX.len())
             .position(|window| window == PLIST_PREFIX)
@@ -370,8 +166,6 @@ pub fn dump_profiles(docs_path: String) -> Res<String> {
                 continue;
             }
         }
-            // the position will return the starting index; we want the ending index
-            // adding the length of the suffix gives us it
             + PLIST_SUFFIX.len();
 
         let extracted_plist = &data[prefix..suffix];
