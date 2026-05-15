@@ -362,7 +362,7 @@ pub fn start_auto_mounter(docs_path: String) {
                                         return Err(Errors::CreateLockdown);
                                 }
                                 match lockdown_client
-                                    .get_value(Some("UniqueChipID"), None)
+                                    .get_value("UniqueChipID")
                                     .await {
                                     Ok(l) => l,
                                     Err(e) => {
