@@ -1,9 +1,10 @@
 // Jackson Coxson
 
 use idevice::{
-    core_device_proxy::CoreDeviceProxy,
+    misagent::MisagentClient,
+    provider::TcpProvider,
     usbmuxd::UsbmuxdConnection,
-    IdeviceService, RsdService,
+    IdeviceService,
 };
 use log::{error, info};
 use plist::Value;
@@ -15,6 +16,7 @@ use std::{
 
 use crate::{
     device::{fetch_first_device, test_device_connection},
+    muxer::DEVICE_IP,
     Errors, Res, RustyPlistConversion, RUNTIME,
 };
 
@@ -69,6 +71,8 @@ pub fn install_provisioning_profile(profile: &[u8]) -> Res<()> {
         return Err(Errors::GetLockdownValue);
     };
 
+    info!("Device iOS major version: {product_version}");
+
     if product_version < 17 {
         let mis_client = match device.new_misagent_client("minimuxer-install-prov") {
             Ok(m) => m,
@@ -91,89 +95,29 @@ pub fn install_provisioning_profile(profile: &[u8]) -> Res<()> {
             }
         }
     } else {
-        info!("iOS 17+ detected — using CoreDeviceProxy misagent path");
+        // iOS 17+: use classic misagent via a direct TCP connection to the device's
+        // lockdownd.  The RSD "shim.remote" variant is not reliably present in the
+        // service list, so we bypass CoreDeviceProxy entirely and connect the same
+        // way SideStore does — straight TCP to the device IP (10.7.0.1 via em_proxy).
+        info!("iOS 17+ detected — installing profile via TCP lockdownd misagent");
         let profile = profile.to_vec();
-        RUNTIME.block_on(install_via_coredevice(profile))
+        RUNTIME.block_on(install_via_tcp(profile))
     }
 }
 
-async fn install_via_coredevice(profile: Vec<u8>) -> Res<()> {
-    let mut uc = UsbmuxdConnection::new(
-        Box::new(
-            match tokio::net::TcpStream::connect("127.0.0.1:27015").await {
-                Ok(u) => u,
-                Err(e) => {
-                    error!("Failed to connect to usbmuxd: {e:?}");
-                    return Err(Errors::NoConnection);
-                }
-            },
-        ),
-        0,
-    );
+async fn install_via_tcp(profile: Vec<u8>) -> Res<()> {
+    let tcp_provider = make_tcp_provider().await?;
 
-    let dev = match uc
-        .get_devices()
-        .await
-        .ok()
-        .and_then(|x| x.into_iter().next())
-    {
-        Some(d) => d.to_provider(
-            idevice::usbmuxd::UsbmuxdAddr::TcpSocket(std::net::SocketAddr::V4(
-                SocketAddrV4::from_str("127.0.0.1:27015").unwrap(),
-            )),
-            "minimuxer",
-        ),
-        None => {
-            error!("No device from usbmuxd");
-            return Err(Errors::NoConnection);
-        }
-    };
-
-    let proxy = match CoreDeviceProxy::connect(&dev).await {
-        Ok(p) => p,
+    let mut mis_client = match MisagentClient::connect(&tcp_provider).await {
+        Ok(m) => m,
         Err(e) => {
-            error!("Failed to connect CoreDeviceProxy: {e:?}");
-            return Err(Errors::CreateCoreDevice);
+            error!("Failed to connect MisagentClient via TCP lockdownd: {e:?}");
+            return Err(Errors::CreateMisagent);
         }
     };
-
-    let rsd_port = proxy.tunnel_info().server_rsd_port;
-    let adapter = match proxy.create_software_tunnel() {
-        Ok(a) => a,
-        Err(e) => {
-            error!("Failed to create software tunnel: {e:?}");
-            return Err(Errors::CreateSoftwareTunnel);
-        }
-    };
-
-    let mut handle = adapter.to_async_handle();
-    let stream = match handle.connect(rsd_port).await {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Failed to connect to RSD port: {e:?}");
-            return Err(Errors::Connect);
-        }
-    };
-
-    let mut handshake = match idevice::rsd::RsdHandshake::new(stream).await {
-        Ok(h) => h,
-        Err(e) => {
-            error!("Failed RSD handshake: {e:?}");
-            return Err(Errors::XpcHandshake);
-        }
-    };
-
-    let mut mis_client =
-        match idevice::misagent::MisagentClient::connect_rsd(&mut handle, &mut handshake).await {
-            Ok(m) => m,
-            Err(e) => {
-                error!("Failed to connect MisagentClient via RSD: {e:?}");
-                return Err(Errors::CreateMisagent);
-            }
-        };
 
     mis_client.install(profile).await.map_err(|e| {
-        error!("Failed to install provisioning profile via RSD misagent: {e:?}");
+        error!("Failed to install provisioning profile via TCP misagent: {e:?}");
         Errors::ProfileInstall
     })
 }
@@ -218,6 +162,8 @@ pub fn remove_provisioning_profile(id: String) -> Res<()> {
         return Err(Errors::GetLockdownValue);
     };
 
+    info!("Device iOS major version: {product_version}");
+
     if product_version < 17 {
         let mis_client = match device.new_misagent_client("minimuxer-install-prov") {
             Ok(m) => m,
@@ -238,18 +184,38 @@ pub fn remove_provisioning_profile(id: String) -> Res<()> {
             }
         }
     } else {
-        info!("iOS 17+ detected — using CoreDeviceProxy misagent path for remove");
-        RUNTIME.block_on(remove_via_coredevice(id))
+        info!("iOS 17+ detected — removing profile via TCP lockdownd misagent");
+        RUNTIME.block_on(remove_via_tcp(id))
     }
 }
 
-async fn remove_via_coredevice(id: String) -> Res<()> {
+async fn remove_via_tcp(id: String) -> Res<()> {
+    let tcp_provider = make_tcp_provider().await?;
+
+    let mut mis_client = match MisagentClient::connect(&tcp_provider).await {
+        Ok(m) => m,
+        Err(e) => {
+            error!("Failed to connect MisagentClient via TCP lockdownd: {e:?}");
+            return Err(Errors::CreateMisagent);
+        }
+    };
+
+    mis_client.remove(&id).await.map_err(|e| {
+        error!("Failed to remove provisioning profile via TCP misagent: {e:?}");
+        Errors::ProfileRemove
+    })
+}
+
+/// Build a TcpProvider pointing at the device's known IP address.
+/// Fetches the pairing file from the local usbmuxd proxy (which handles
+/// ReadPairRecord without needing a Connect message).
+async fn make_tcp_provider() -> Res<TcpProvider> {
     let mut uc = UsbmuxdConnection::new(
         Box::new(
             match tokio::net::TcpStream::connect("127.0.0.1:27015").await {
                 Ok(u) => u,
                 Err(e) => {
-                    error!("Failed to connect to usbmuxd: {e:?}");
+                    error!("Failed to connect to usbmuxd proxy: {e:?}");
                     return Err(Errors::NoConnection);
                 }
             },
@@ -270,57 +236,33 @@ async fn remove_via_coredevice(id: String) -> Res<()> {
             "minimuxer",
         ),
         None => {
-            error!("No device from usbmuxd");
+            error!("No device returned from usbmuxd proxy");
             return Err(Errors::NoConnection);
         }
     };
 
-    let proxy = match CoreDeviceProxy::connect(&dev).await {
+    let pairing_file = match dev.get_pairing_file().await {
         Ok(p) => p,
         Err(e) => {
-            error!("Failed to connect CoreDeviceProxy: {e:?}");
-            return Err(Errors::CreateCoreDevice);
+            error!("Failed to get pairing file from usbmuxd proxy: {e:?}");
+            return Err(Errors::PairingFile);
         }
     };
 
-    let rsd_port = proxy.tunnel_info().server_rsd_port;
-    let adapter = match proxy.create_software_tunnel() {
-        Ok(a) => a,
+    let device_ip_str = DEVICE_IP.get().cloned().unwrap_or_else(|| "10.7.0.1".to_string());
+    let device_ip = match std::net::IpAddr::from_str(&device_ip_str) {
+        Ok(ip) => ip,
         Err(e) => {
-            error!("Failed to create software tunnel: {e:?}");
-            return Err(Errors::CreateSoftwareTunnel);
+            error!("Failed to parse device IP '{device_ip_str}': {e:?}");
+            return Err(Errors::NoConnection);
         }
     };
 
-    let mut handle = adapter.to_async_handle();
-    let stream = match handle.connect(rsd_port).await {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Failed to connect to RSD port: {e:?}");
-            return Err(Errors::Connect);
-        }
-    };
-
-    let mut handshake = match idevice::rsd::RsdHandshake::new(stream).await {
-        Ok(h) => h,
-        Err(e) => {
-            error!("Failed RSD handshake: {e:?}");
-            return Err(Errors::XpcHandshake);
-        }
-    };
-
-    let mut mis_client =
-        match idevice::misagent::MisagentClient::connect_rsd(&mut handle, &mut handshake).await {
-            Ok(m) => m,
-            Err(e) => {
-                error!("Failed to connect MisagentClient via RSD: {e:?}");
-                return Err(Errors::CreateMisagent);
-            }
-        };
-
-    mis_client.remove(&id).await.map_err(|e| {
-        error!("Failed to remove provisioning profile via RSD misagent: {e:?}");
-        Errors::ProfileRemove
+    info!("TCP misagent: connecting to device at {device_ip}");
+    Ok(TcpProvider {
+        addr: device_ip,
+        pairing_file,
+        label: "minimuxer".to_string(),
     })
 }
 
