@@ -331,7 +331,7 @@ async fn remove_via_coredevice(id: String) -> Res<()> {
             }
         };
 
-    mis_client.remove(id).await.map_err(|e| {
+    mis_client.remove(&id).await.map_err(|e| {
         error!("Failed to remove provisioning profile via RSD misagent: {e:?}");
         Errors::ProfileRemove
     })
