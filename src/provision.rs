@@ -4,6 +4,7 @@ use idevice::{
     core_device_proxy::CoreDeviceProxy,
     provider::{IdeviceProvider, TcpProvider},
     usbmuxd::UsbmuxdConnection,
+    IdeviceService, RsdService,
 };
 use log::{error, info};
 use plist::Value;

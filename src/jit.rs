@@ -11,7 +11,7 @@ use idevice::{
     debug_proxy::DebugProxyClient,
     provider::{IdeviceProvider, TcpProvider},
     usbmuxd::UsbmuxdConnection,
-    IdeviceService,
+    IdeviceService, RsdService,
 };
 use log::{debug, error, info};
 use plist_plus::Plist;
