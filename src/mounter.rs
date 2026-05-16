@@ -1,10 +1,10 @@
 // Jackson Coxson
 
 
-use idevice::{lockdown::LockdownClient, mobile_image_mounter::ImageMounter, provider::{IdeviceProvider, TcpProvider}, usbmuxd::UsbmuxdConnection, IdeviceService};
+use idevice::{lockdown::LockdownClient, mobile_image_mounter::ImageMounter, usbmuxd::UsbmuxdConnection, IdeviceService};
 use log::{debug, error, info};
 use std::{
-    io::Write, net::{Ipv4Addr, SocketAddrV4}, path::{Path, PathBuf}, str::FromStr, sync::atomic::{AtomicBool, Ordering}
+    io::Write, net::SocketAddrV4, path::{Path, PathBuf}, str::FromStr, sync::atomic::{AtomicBool, Ordering}
 };
 use tokio::io::AsyncWriteExt;
 
@@ -334,15 +334,8 @@ pub fn start_auto_mounter(docs_path: String) {
                             }
                         };
 
-                        info!("Creating provider from usbmuxd device");
-                        let provider = TcpProvider {
-                            addr: std::net::IpAddr::V4(Ipv4Addr::from_str("10.7.0.1").unwrap()),
-                            pairing_file: dev.get_pairing_file().await.unwrap(),
-                            label: "minimuxer".to_string(),
-                        };
-
                         info!("Connecting to lockdown for UCID");
-                        let mut lockdown_client = match LockdownClient::connect(&provider)
+                        let mut lockdown_client = match LockdownClient::connect(&dev)
                             .await {
                             Ok(l) => l,
                             Err(e) => {
@@ -356,7 +349,7 @@ pub fn start_auto_mounter(docs_path: String) {
                             Ok(u) => u,
                             Err(_) => {
                                 if let Err(e) = lockdown_client
-                                    .start_session(&provider.get_pairing_file().await.unwrap())
+                                    .start_session(&dev.get_pairing_file().await.unwrap())
                                     .await {
                                         error!("Failed to start session: {e:?}");
                                         return Err(Errors::CreateLockdown);
@@ -381,7 +374,7 @@ pub fn start_auto_mounter(docs_path: String) {
                         };
 
                         info!("Connecting to image mounter");
-                        let mut mounter_client = ImageMounter::connect(&provider)
+                        let mut mounter_client = ImageMounter::connect(&dev)
                             .await
                             .expect("Unable to connect to image mounter");
 

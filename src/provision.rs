@@ -2,7 +2,6 @@
 
 use idevice::{
     core_device_proxy::CoreDeviceProxy,
-    provider::{IdeviceProvider, TcpProvider},
     usbmuxd::UsbmuxdConnection,
     IdeviceService, RsdService,
 };
@@ -10,7 +9,7 @@ use log::{error, info};
 use plist::Value;
 use plist_plus::Plist;
 use std::{
-    net::{Ipv4Addr, SocketAddrV4},
+    net::SocketAddrV4,
     str::FromStr,
 };
 
@@ -130,13 +129,7 @@ async fn install_via_coredevice(profile: Vec<u8>) -> Res<()> {
         }
     };
 
-    let provider = TcpProvider {
-        addr: std::net::IpAddr::V4(Ipv4Addr::from_str("10.7.0.1").unwrap()),
-        pairing_file: dev.get_pairing_file().await.unwrap(),
-        label: "minimuxer".to_string(),
-    };
-
-    let proxy = match CoreDeviceProxy::connect(&provider).await {
+    let proxy = match CoreDeviceProxy::connect(&dev).await {
         Ok(p) => p,
         Err(e) => {
             error!("Failed to connect CoreDeviceProxy: {e:?}");
@@ -282,13 +275,7 @@ async fn remove_via_coredevice(id: String) -> Res<()> {
         }
     };
 
-    let provider = TcpProvider {
-        addr: std::net::IpAddr::V4(Ipv4Addr::from_str("10.7.0.1").unwrap()),
-        pairing_file: dev.get_pairing_file().await.unwrap(),
-        label: "minimuxer".to_string(),
-    };
-
-    let proxy = match CoreDeviceProxy::connect(&provider).await {
+    let proxy = match CoreDeviceProxy::connect(&dev).await {
         Ok(p) => p,
         Err(e) => {
             error!("Failed to connect CoreDeviceProxy: {e:?}");

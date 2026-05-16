@@ -2,14 +2,13 @@
 
 
 use std::{
-    net::{Ipv4Addr, SocketAddrV4},
+    net::SocketAddrV4,
     str::FromStr,
 };
 
 use idevice::{
     core_device_proxy::CoreDeviceProxy,
     debug_proxy::DebugProxyClient,
-    provider::{IdeviceProvider, TcpProvider},
     usbmuxd::UsbmuxdConnection,
     IdeviceService, RsdService,
 };
@@ -209,13 +208,7 @@ pub fn debug_app(app_id: String) -> Res<()> {
                 }
             };
 
-            let provider = TcpProvider {
-                addr: std::net::IpAddr::V4(Ipv4Addr::from_str("10.7.0.1").unwrap()),
-                pairing_file: dev.get_pairing_file().await.unwrap(),
-                label: "minimuxer".to_string(),
-            };
-
-            let proxy = match CoreDeviceProxy::connect(&provider).await {
+            let proxy = match CoreDeviceProxy::connect(&dev).await {
                 Ok(p) => p,
                 Err(e) => {
                     error!("Failed to proxy device: {:?}", e);
