@@ -2,7 +2,7 @@
 
 use idevice::{
     misagent::MisagentClient,
-    provider::TcpProvider,
+    provider::{IdeviceProvider, TcpProvider},
     usbmuxd::UsbmuxdConnection,
     IdeviceService,
 };

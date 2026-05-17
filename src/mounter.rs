@@ -1,7 +1,7 @@
 // Jackson Coxson
 
 
-use idevice::{lockdown::LockdownClient, mobile_image_mounter::ImageMounter, usbmuxd::UsbmuxdConnection, IdeviceService};
+use idevice::{lockdown::LockdownClient, mobile_image_mounter::ImageMounter, provider::IdeviceProvider, usbmuxd::UsbmuxdConnection, IdeviceService};
 use log::{debug, error, info};
 use std::{
     io::Write, net::SocketAddrV4, path::{Path, PathBuf}, str::FromStr, sync::atomic::{AtomicBool, Ordering}
@@ -420,7 +420,7 @@ pub fn start_auto_mounter(docs_path: String) {
                         info!("Mounting DDI...");
                         if let Err(e) = mounter_client
                             .mount_personalized_with_callback(
-                                &provider,
+                                &dev,
                                 image_dmg,
                                 trustcache,
                                 &manifest,
