@@ -8,11 +8,10 @@ use idevice::{
 };
 use log::{error, info};
 use plist::Value;
-use plist_plus::Plist;
 use std::{net::SocketAddrV4, str::FromStr};
 
 use crate::{
-    device::test_device_connection,
+    device::{fetch_first_device, test_device_connection},
     muxer::DEVICE_IP,
     Errors, Res, RustyPlistConversion, RUNTIME,
 };
