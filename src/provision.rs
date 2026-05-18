@@ -9,13 +9,10 @@ use idevice::{
 use log::{error, info};
 use plist::Value;
 use plist_plus::Plist;
-use std::{
-    net::SocketAddrV4,
-    str::FromStr,
-};
+use std::{net::SocketAddrV4, str::FromStr};
 
 use crate::{
-    device::{fetch_first_device, test_device_connection},
+    device::test_device_connection,
     muxer::DEVICE_IP,
     Errors, Res, RustyPlistConversion, RUNTIME,
 };
@@ -42,67 +39,8 @@ pub fn install_provisioning_profile(profile: &[u8]) -> Res<()> {
         return Err(Errors::NoConnection);
     }
 
-    let device = fetch_first_device()?;
-
-    let ld_client = match device.new_lockdownd_client("minimuxer-prov-version") {
-        Ok(l) => l,
-        Err(e) => {
-            error!("Failed to connect to lockdown for version check: {e:?}");
-            return Err(Errors::CreateLockdown);
-        }
-    };
-
-    let product_version = match ld_client.get_value("ProductVersion", "") {
-        Ok(p) => p,
-        Err(e) => {
-            error!("Failed to get ProductVersion: {e:?}");
-            return Err(Errors::GetLockdownValue);
-        }
-    };
-
-    let product_version = if let Some(v) = product_version
-        .get_string_val()
-        .ok()
-        .and_then(|x| x.split('.').next().and_then(|s| s.parse::<u8>().ok()))
-    {
-        v
-    } else {
-        error!("Failed to parse ProductVersion as major version number");
-        return Err(Errors::GetLockdownValue);
-    };
-
-    info!("Device iOS major version: {product_version}");
-
-    if product_version < 17 {
-        let mis_client = match device.new_misagent_client("minimuxer-install-prov") {
-            Ok(m) => m,
-            Err(e) => {
-                error!("Failed to start misagent client: {:?}", e);
-                return Err(Errors::CreateMisagent);
-            }
-        };
-
-        let plist = Plist::new_data(profile);
-
-        match mis_client.install(plist) {
-            Ok(_) => {
-                info!("Successfully installed provisioning profile!");
-                Ok(())
-            }
-            Err(e) => {
-                error!("Unable to install provisioning profile: {:?}", e);
-                Err(Errors::ProfileInstall)
-            }
-        }
-    } else {
-        // iOS 17+: use classic misagent via a direct TCP connection to the device's
-        // lockdownd.  The RSD "shim.remote" variant is not reliably present in the
-        // service list, so we bypass CoreDeviceProxy entirely and connect the same
-        // way SideStore does — straight TCP to the device IP (10.7.0.1 via em_proxy).
-        info!("iOS 17+ detected — installing profile via TCP lockdownd misagent");
-        let profile = profile.to_vec();
-        RUNTIME.block_on(install_via_tcp(profile))
-    }
+    let profile = profile.to_vec();
+    RUNTIME.block_on(install_via_tcp(profile))
 }
 
 async fn install_via_tcp(profile: Vec<u8>) -> Res<()> {
@@ -133,60 +71,7 @@ pub fn remove_provisioning_profile(id: String) -> Res<()> {
         return Err(Errors::NoConnection);
     }
 
-    let device = fetch_first_device()?;
-
-    let ld_client = match device.new_lockdownd_client("minimuxer-prov-version") {
-        Ok(l) => l,
-        Err(e) => {
-            error!("Failed to connect to lockdown for version check: {e:?}");
-            return Err(Errors::CreateLockdown);
-        }
-    };
-
-    let product_version = match ld_client.get_value("ProductVersion", "") {
-        Ok(p) => p,
-        Err(e) => {
-            error!("Failed to get ProductVersion: {e:?}");
-            return Err(Errors::GetLockdownValue);
-        }
-    };
-
-    let product_version = if let Some(v) = product_version
-        .get_string_val()
-        .ok()
-        .and_then(|x| x.split('.').next().and_then(|s| s.parse::<u8>().ok()))
-    {
-        v
-    } else {
-        error!("Failed to parse ProductVersion as major version number");
-        return Err(Errors::GetLockdownValue);
-    };
-
-    info!("Device iOS major version: {product_version}");
-
-    if product_version < 17 {
-        let mis_client = match device.new_misagent_client("minimuxer-install-prov") {
-            Ok(m) => m,
-            Err(e) => {
-                error!("Failed to start misagent client: {:?}", e);
-                return Err(Errors::CreateMisagent);
-            }
-        };
-
-        match mis_client.remove(id) {
-            Ok(_) => {
-                info!("Successfully removed profile");
-                Ok(())
-            }
-            Err(e) => {
-                error!("Unable to remove provisioning profile: {:?}", e);
-                Err(Errors::ProfileRemove)
-            }
-        }
-    } else {
-        info!("iOS 17+ detected — removing profile via TCP lockdownd misagent");
-        RUNTIME.block_on(remove_via_tcp(id))
-    }
+    RUNTIME.block_on(remove_via_tcp(id))
 }
 
 async fn remove_via_tcp(id: String) -> Res<()> {
