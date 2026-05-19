@@ -1,19 +1,12 @@
 // Jackson Coxson
 
-use idevice::{
-    misagent::MisagentClient,
-    provider::{IdeviceProvider, TcpProvider},
-    usbmuxd::UsbmuxdConnection,
-    IdeviceService,
-};
 use log::{error, info};
 use plist::Value;
-use std::{net::SocketAddrV4, str::FromStr};
+use plist_plus::Plist;
 
 use crate::{
     device::{fetch_first_device, test_device_connection},
-    muxer::DEVICE_IP,
-    Errors, Res, RustyPlistConversion, RUNTIME,
+    Errors, Res, RustyPlistConversion,
 };
 
 #[swift_bridge::bridge]
@@ -38,25 +31,28 @@ pub fn install_provisioning_profile(profile: &[u8]) -> Res<()> {
         return Err(Errors::NoConnection);
     }
 
-    let profile = profile.to_vec();
-    RUNTIME.block_on(install_via_tcp(profile))
-}
+    let device = fetch_first_device()?;
 
-async fn install_via_tcp(profile: Vec<u8>) -> Res<()> {
-    let tcp_provider = make_tcp_provider().await?;
-
-    let mut mis_client = match MisagentClient::connect(&tcp_provider).await {
+    let mis_client = match device.new_misagent_client("minimuxer-install-prov") {
         Ok(m) => m,
         Err(e) => {
-            error!("Failed to connect MisagentClient via TCP lockdownd: {e:?}");
+            error!("Failed to start misagent client: {:?}", e);
             return Err(Errors::CreateMisagent);
         }
     };
 
-    mis_client.install(profile).await.map_err(|e| {
-        error!("Failed to install provisioning profile via TCP misagent: {e:?}");
-        Errors::ProfileInstall
-    })
+    let plist = Plist::new_data(profile);
+
+    match mis_client.install(plist) {
+        Ok(_) => {
+            info!("Successfully installed provisioning profile!");
+            Ok(())
+        }
+        Err(e) => {
+            error!("Unable to install provisioning profile: {:?}", e);
+            Err(Errors::ProfileInstall)
+        }
+    }
 }
 
 /// Removes a provisioning profile
@@ -70,84 +66,26 @@ pub fn remove_provisioning_profile(id: String) -> Res<()> {
         return Err(Errors::NoConnection);
     }
 
-    RUNTIME.block_on(remove_via_tcp(id))
-}
+    let device = fetch_first_device()?;
 
-async fn remove_via_tcp(id: String) -> Res<()> {
-    let tcp_provider = make_tcp_provider().await?;
-
-    let mut mis_client = match MisagentClient::connect(&tcp_provider).await {
+    let mis_client = match device.new_misagent_client("minimuxer-install-prov") {
         Ok(m) => m,
         Err(e) => {
-            error!("Failed to connect MisagentClient via TCP lockdownd: {e:?}");
+            error!("Failed to start misagent client: {:?}", e);
             return Err(Errors::CreateMisagent);
         }
     };
 
-    mis_client.remove(&id).await.map_err(|e| {
-        error!("Failed to remove provisioning profile via TCP misagent: {e:?}");
-        Errors::ProfileRemove
-    })
-}
-
-/// Build a TcpProvider pointing at the device's known IP address.
-/// Fetches the pairing file from the local usbmuxd proxy (which handles
-/// ReadPairRecord without needing a Connect message).
-async fn make_tcp_provider() -> Res<TcpProvider> {
-    let mut uc = UsbmuxdConnection::new(
-        Box::new(
-            match tokio::net::TcpStream::connect("127.0.0.1:27015").await {
-                Ok(u) => u,
-                Err(e) => {
-                    error!("Failed to connect to usbmuxd proxy: {e:?}");
-                    return Err(Errors::NoConnection);
-                }
-            },
-        ),
-        0,
-    );
-
-    let dev = match uc
-        .get_devices()
-        .await
-        .ok()
-        .and_then(|x| x.into_iter().next())
-    {
-        Some(d) => d.to_provider(
-            idevice::usbmuxd::UsbmuxdAddr::TcpSocket(std::net::SocketAddr::V4(
-                SocketAddrV4::from_str("127.0.0.1:27015").unwrap(),
-            )),
-            "minimuxer",
-        ),
-        None => {
-            error!("No device returned from usbmuxd proxy");
-            return Err(Errors::NoConnection);
+    match mis_client.remove(id) {
+        Ok(_) => {
+            info!("Successfully removed profile");
+            Ok(())
         }
-    };
-
-    let pairing_file = match dev.get_pairing_file().await {
-        Ok(p) => p,
         Err(e) => {
-            error!("Failed to get pairing file from usbmuxd proxy: {e:?}");
-            return Err(Errors::PairingFile);
+            error!("Unable to remove provisioning profile: {:?}", e);
+            Err(Errors::ProfileRemove)
         }
-    };
-
-    let device_ip_str = DEVICE_IP.get().cloned().unwrap_or_else(|| "10.7.0.1".to_string());
-    let device_ip = match std::net::IpAddr::from_str(&device_ip_str) {
-        Ok(ip) => ip,
-        Err(e) => {
-            error!("Failed to parse device IP '{device_ip_str}': {e:?}");
-            return Err(Errors::NoConnection);
-        }
-    };
-
-    info!("TCP misagent: connecting to device at {device_ip}");
-    Ok(TcpProvider {
-        addr: device_ip,
-        pairing_file,
-        label: "minimuxer".to_string(),
-    })
+    }
 }
 
 pub fn dump_profiles(docs_path: String) -> Res<String> {
