@@ -19,7 +19,6 @@ mod afc_file_manager;
 mod device;
 mod heartbeat;
 mod install;
-mod jit;
 mod mounter;
 mod muxer;
 mod provision;
@@ -47,30 +46,10 @@ mod ffi {
         NoConnection,
         PairingFile,
 
-        CreateDebug,
         CreateInstproxy,
         CreateLockdown,
-        CreateCoreDevice,
-        CreateSoftwareTunnel,
-        CreateRemoteServer,
-        CreateProcessControl,
 
-        /* jit */
         GetLockdownValue,
-        Connect,
-        Close,
-        XpcHandshake,
-        NoService,
-        InvalidProductVersion,
-        LookupApps,
-        FindApp,
-        BundlePath,
-        MaxPacket,
-        WorkingDirectory,
-        Argv,
-        LaunchSuccess,
-        Detach,
-        Attach,
 
         /* install */
         CreateAfc,
